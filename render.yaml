@@ -1,0 +1,21 @@
+# Render Configuration for Zendesk JWT Auth
+
+services:
+  - type: web
+    name: zendesk-jwt-auth
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: ZENDESK_JWT_SECRET
+        sync: false  # Set this in Render dashboard
+      - key: ZENDESW_KID
+        sync: false  # Set this in Render dashboard
+      - key: ZENDESK_WIDGET_KEY
+        sync: false  # Set this in Render dashboard
+      - key: ZENDESK_ACCOUNT
+        value: z3nbwilliams.zendesk.com

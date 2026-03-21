@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zendesk Messaging JWT Auth</title>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            max-width: 900px; 
+            margin: 20px auto; 
+            padding: 20px; 
+            background: #f5f5f5; 
+        }
+        .card { 
+            background: white; 
+            padding: 25px; 
+            margin: 20px 0; 
+            border-radius: 12px; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h2 { 
+            color: #333; 
+            margin-top: 0;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        .form-group {
+            margin: 15px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #555;
+        }
+        input[type="text"], input[type="email"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        input:focus {
+            border-color: #667eea;
+            outline: none;
+        }
+        button { 
+            background: #667eea; 
+            color: white; 
+            border: none; 
+            padding: 15px 30px; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 16px; 
+            margin: 10px 5px;
+            transition: background 0.2s;
+        }
+        button:hover { background: #5a67d8; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        button.secondary { background: #6c757d; }
+        button.secondary:hover { background: #5a6268; }
+        button.success { background: #28a745; }
+        button.success:hover { background: #218838; }
+        pre { 
+            background: #1e1e1e; 
+            color: #d4d4d4; 
+            padding: 15px; 
+            border-radius: 8px; 
+            overflow-x: auto; 
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .status { 
+            padding: 15px; 
+            border-radius: 8px; 
+            margin: 15px 0;
+            font-weight: 500;
+        }
+        .status.ready { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .status.pending { background: #fff3cd; color: #856404; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+        .user-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        .user-info strong {
+            color: #667eea;
+        }
+        hr {
+            border: none;
+            border-top: 2px solid #e0e0e0;
+            margin: 30px 0;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            font-size: 48px;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="logo">🔐</div>
+    <h1>Zendesk Messaging JWT Authentication</h1>
+
+    <!-- Create New User Form -->
+    <div class="card">
+        <h2>🆕 Create New Authenticated User</h2>
+        <p>Enter user details to generate a JWT token and authenticate with Zendesk.</p>
+        
+        <div class="form-group">
+            <label for="newUserName">Full Name *</label>
+            <input type="text" id="newUserName" placeholder="e.g., John Smith" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="newUserEmail">Email Address *</label>
+            <input type="email" id="newUserEmail" placeholder="e.g., john.smith@example.com" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="newUserId">External ID (optional)</label>
+            <input type="text" id="newUserId" placeholder="e.g., user_12345 (auto-generated if empty)">
+        </div>
+        
+        <button id="createUserBtn">Create User & Authenticate</button>
+        <button id="clearFormBtn" class="secondary">Clear Form</button>
+        
+        <div id="createUserStatus"></div>
+    </div>
+
+    <hr>
+
+    <!-- Current User Display -->
+    <div class="card" id="currentUserCard" style="display: none;">
+        <h2>👤 Current Authenticated User</h2>
+        <div class="user-info" id="currentUserInfo"></div>
+        
+        <div style="margin-top: 15px;">
+            <button id="openMessengerBtn" class="success">Open Messenger</button>
+            <button id="logoutBtn" class="secondary">Logout</button>
+        </div>
+    </div>
+
+    <!-- JWT Token Display -->
+    <div class="card" id="tokenCard" style="display: none;">
+        <h2>🔑 JWT Token</h2>
+        <pre id="tokenDisplay"></pre>
+    </div>
+
+    <!-- Debug Log -->
+    <div class="card">
+        <h2>📝 Debug Log</h2>
+        <pre id="log">Waiting for input...</pre>
+    </div>
+
+    <!-- Zendesk Widget -->
+    <script id="ze-snippet" src="https://static.zdassets.com/ekr/snippet.js?key=8b5a738b-fb7a-42c5-95a6-1cb26e82900a"></script>
+
+    <script>
+        const API_URL = window.location.origin;
+        let currentToken = null;
+        let currentUser = null;
+
+        // DOM elements
+        const newUserName = document.getElementById('newUserName');
+        const newUserEmail = document.getElementById('newUserEmail');
+        const newUserId = document.getElementById('newUserId');
+        const createUserBtn = document.getElementById('createUserBtn');
+        const clearFormBtn = document.getElementById('clearFormBtn');
+        const createUserStatus = document.getElementById('createUserStatus');
+        const currentUserCard = document.getElementById('currentUserCard');
+        const currentUserInfo = document.getElementById('currentUserInfo');
+        const tokenCard = document.getElementById('tokenCard');
+        const tokenDisplay = document.getElementById('tokenDisplay');
+        const openMessengerBtn = document.getElementById('openMessengerBtn');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const logDiv = document.getElementById('log');
+
+        function log(msg, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            const color = type === 'error' ? '#ff6b6b' : type === 'success' ? '#7ee787' : '#d4d4d4';
+            logDiv.innerHTML += `\u003cspan style="color: ${color}">[${time}] ${msg}\u003c/span\u003e\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(`[${time}] ${msg}`);
+        }
+
+        function showStatus(element, msg, type) {
+            element.innerHTML = `\u003cdiv class="status ${type}">${msg}\u003c/div\u003e`;
+        }
+
+        // Generate unique user ID
+        function generateUserId() {
+            return 'user_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        // Create new user and authenticate
+        async function createAndAuthenticateUser() {
+            const name = newUserName.value.trim();
+            const email = newUserEmail.value.trim();
+            const userId = newUserId.value.trim() || generateUserId();
+
+            // Validation
+            if (!name) {
+                showStatus(createUserStatus, 'Please enter a name', 'error');
+                return;
+            }
+            if (!email) {
+                showStatus(createUserStatus, 'Please enter an email', 'error');
+                return;
+            }
+            if (!email.includes('@')) {
+                showStatus(createUserStatus, 'Please enter a valid email', 'error');
+                return;
+            }
+
+            log(`Creating user: ${name} (${email})`);
+            showStatus(createUserStatus, 'Generating JWT token...', 'pending');
+            createUserBtn.disabled = true;
+
+            try {
+                // Generate JWT token
+                const response = await fetch(`${API_URL}/api/auth/token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        userId: userId,
+                        name: name,
+                        email: email
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (!data.token) {
+                    throw new Error(data.message || 'Failed to generate token');
+                }
+
+                currentToken = data.token;
+                currentUser = { userId, name, email };
+
+                log('✓ JWT token generated', 'success');
+
+                // Decode and display token
+                const parts = currentToken.split('.');
+                const header = JSON.parse(atob(parts[0]));
+                const payload = JSON.parse(atob(parts[1]));
+                
+                tokenDisplay.textContent = 
+                    'HEADER:\n' + JSON.stringify(header, null, 2) + 
+                    '\n\nPAYLOAD:\n' + JSON.stringify(payload, null, 2) +
+                    '\n\nRAW TOKEN:\n' + currentToken;
+                
+                tokenCard.style.display = 'block';
+
+                // Authenticate with Zendesk
+                log('Authenticating with Zendesk...');
+                showStatus(createUserStatus, 'Authenticating with Zendesk...', 'pending');
+
+                if (typeof zE !== 'function') {
+                    throw new Error('Zendesk widget not loaded');
+                }
+
+                zE("messenger", "loginUser", function (callback) {
+                    log('Zendesk callback invoked');
+                    callback(currentToken);
+                    log('✓ Token sent to Zendesk', 'success');
+                });
+
+                // Display current user
+                currentUserInfo.innerHTML = `
+                    \u003cstrong\u003eName:\u003c/strong\u003e ${name}\u003cbr\u003e
+                    \u003cstrong\u003eEmail:\u003c/strong\u003e ${email}\u003cbr\u003e
+                    \u003cstrong\u003eExternal ID:\u003c/strong\u003e ${userId}
+                `;
+                currentUserCard.style.display = 'block';
+
+                showStatus(createUserStatus, '✓ User created and authenticated!', 'ready');
+                log('✓ User authenticated successfully', 'success');
+
+            } catch (error) {
+                log('✗ Error: ' + error.message, 'error');
+                showStatus(createUserStatus, 'Error: ' + error.message, 'error');
+            } finally {
+                createUserBtn.disabled = false;
+            }
+        }
+
+        // Open messenger
+        function openMessenger() {
+            if (typeof zE === 'function') {
+                try {
+                    zE('messenger', 'open');
+                    log('Messenger opened');
+                } catch (e) {
+                    log('Error: ' + e.message, 'error');
+                }
+            }
+        }
+
+        // Logout
+        function logout() {
+            if (typeof zE === 'function') {
+                try {
+                    zE('messenger', 'logoutUser');
+                    log('User logged out');
+                } catch (e) {
+                    log('Error logging out: ' + e.message);
+                }
+            }
+            
+            currentToken = null;
+            currentUser = null;
+            currentUserCard.style.display = 'none';
+            tokenCard.style.display = 'none';
+            createUserStatus.innerHTML = '';
+            log('Session cleared');
+        }
+
+        // Clear form
+        function clearForm() {
+            newUserName.value = '';
+            newUserEmail.value = '';
+            newUserId.value = '';
+            createUserStatus.innerHTML = '';
+            log('Form cleared');
+        }
+
+        // Event listeners
+        createUserBtn.addEventListener('click', createAndAuthenticateUser);
+        openMessengerBtn.addEventListener('click', openMessenger);
+        logoutBtn.addEventListener('click', logout);
+        clearFormBtn.addEventListener('click', clearForm);
+
+        // Wait for widget
+        let attempts = 0;
+        const checkWidget = setInterval(() => {
+            attempts++;
+            if (typeof zE === 'function') {
+                clearInterval(checkWidget);
+                log('✓ Zendesk widget loaded', 'success');
+            } else if (attempts > 60) {
+                clearInterval(checkWidget);
+                log('✗ Widget load timeout', 'error');
+            }
+        }, 500);
+
+        // Focus on name field
+        newUserName.focus();
+    </script>
+</body>
+</html>

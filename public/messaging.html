@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zendesk Messaging JWT Auth</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            min-height: 100vh;
+        }
+        .header {
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .logo-text {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        .status-badge.authenticated {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status-badge.pending {
+            background: #cce5ff;
+            color: #004085;
+        }
+        .status-badge.unauthenticated {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .status-badge.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .debug-log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 1rem;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 1rem;
+        }
+        .debug-log .success { color: #4ec9b0; }
+        .debug-log .error { color: #f48771; }
+        .debug-log .info { color: #9cdcfe; }
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin: 0.5rem 0.5rem 0 0;
+        }
+        .btn:hover { background: #5a67d8; }
+        .btn-secondary { background: #6c757d; }
+        .btn-secondary:hover { background: #5a6268; }
+        h2 { color: #333; margin-bottom: 1rem; font-size: 1.5rem; }
+        p { color: #666; line-height: 1.6; margin-bottom: 1rem; }
+        .user-info {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-top: 1rem;
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .detail-row:last-child { border-bottom: none; }
+        .detail-label { color: #666; font-size: 0.9rem; }
+        .detail-value { color: #333; font-weight: 500; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <!-- Zendesk Messaging Widget Script -->
+    <script>
+        // Zendesk Messaging SDK Loader
+        window.zEmbed = function() {
+            arguments[4].arguments = arguments;
+        };
+        window.zE = window.zE || function() {
+            window.zEmbed(arguments);
+        };
+        window.zESettings = {
+            webWidget: {
+                authenticate: {
+                    chat: {
+                        jwtFn: function(callback) {
+                            // This function is called by Zendesk when authentication is needed
+                            // The fetchJWT function is defined in app.js
+                            if (window.fetchZendeskJWT) {
+                                window.fetchZendeskJWT(callback);
+                            } else {
+                                console.error('fetchZendeskJWT not available');
+                                callback(null);
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    </script>
+    <script id="ze-snippet" src="https://static.zdassets.com/ekr/snippet.js?key=8b5a738b-fb7a-42c5-95a6-1cb26e82900a"></script>
+
+    <header class="header">
+        <div class="logo">
+            <span class="logo-text">🔐 Zendesk JWT Auth</span>
+        </div>
+        <button class="btn btn-secondary" onclick="logout()">Logout</button>
+    </header>
+
+    <main class="container">
+        <div class="card">
+            <h2>Authentication Status</h2>
+            <p>The Zendesk widget should automatically authenticate with JWT when loaded.</p>
+            
+            <div id="authStatus" class="status-badge pending">
+                <span id="statusText">Initializing...</span>
+            </div>
+
+            <div style="margin-top: 1rem;">
+                <button class="btn" onclick="manualAuthenticate()">Manual Authenticate</button>
+                <button class="btn btn-secondary" onclick="testConnection()">Test Connection</button>
+                <button class="btn btn-secondary" onclick="clearLog()">Clear Log</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>User Profile</h2>
+            <div class="user-info">
+                <div class="detail-row">
+                    <span class="detail-label">Name</span>
+                    <span class="detail-value" id="userName">Demo User</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Email</span>
+                    <span class="detail-value" id="userEmail">user@example.com</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">External ID</span>
+                    <span class="detail-value" id="userId">user_12345</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Email Verified</span>
+                    <span class="detail-value">Yes</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Debug Log</h2>
+            <div id="debugLog" class="debug-log">Waiting for initialization...</div>
+        </div>
+    </main>
+
+    <script>
+        // Configuration
+        const API_BASE_URL = window.location.origin;
+        const userData = {
+            id: 'user_12345',
+            name: 'Demo User',
+            email: 'user@example.com'
+        };
+
+        // Logging
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logDiv = document.getElementById('debugLog');
+            const line = document.createElement('div');
+            line.className = type;
+            line.textContent = `[${timestamp}] ${message}`;
+            logDiv.appendChild(line);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(`[${type}] ${message}`);
+        }
+
+        function clearLog() {
+            document.getElementById('debugLog').innerHTML = '';
+        }
+
+        function updateStatus(status, message) {
+            const badge = document.getElementById('authStatus');
+            const text = document.getElementById('statusText');
+            badge.className = 'status-badge ' + status;
+            text.textContent = message;
+            log(`Status: ${message}`, status === 'error' ? 'error' : 'info');
+        }
+
+        // Fetch fresh JWT token from server
+        async function fetchFreshToken() {
+            try {
+                log('Fetching JWT token from server...', 'info');
+                
+                const response = await fetch(`${API_BASE_URL}/api/auth/token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        userId: userData.id,
+                        email: userData.email,
+                        name: userData.name
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success' && data.token) {
+                    log('JWT token received successfully', 'success');
+                    return data.token;
+                } else {
+                    throw new Error(data.message || 'Token generation failed');
+                }
+            } catch (error) {
+                log(`Token fetch error: ${error.message}`, 'error');
+                return null;
+            }
+        }
+
+        // Global function for Zendesk to call
+        window.fetchZendeskJWT = async function(callback) {
+            log('Zendesk requesting JWT...', 'info');
+            const token = await fetchFreshToken();
+            
+            if (token) {
+                log('Providing JWT to Zendesk widget', 'success');
+                updateStatus('authenticated', 'Authenticated');
+                callback(token);
+            } else {
+                log('Failed to get token', 'error');
+                updateStatus('error', 'Authentication failed');
+                callback(null);
+            }
+        };
+
+        // Manual authentication
+        async function manualAuthenticate() {
+            updateStatus('pending', 'Authenticating...');
+            
+            if (typeof zE === 'function') {
+                try {
+                    // Get fresh token
+                    const token = await fetchFreshToken();
+                    
+                    if (token) {
+                        // Use zE to authenticate
+                        zE('messenger', 'loginUser', function(cb) {
+                            cb(token);
+                        });
+                        
+                        log('Authentication sent to widget', 'success');
+                        updateStatus('authenticated', 'Authenticated');
+                    }
+                } catch (error) {
+                    log(`Authentication error: ${error.message}`, 'error');
+                    updateStatus('error', 'Authentication failed');
+                }
+            } else {
+                log('zE not available', 'error');
+                updateStatus('error', 'Widget not loaded');
+            }
+        }
+
+        // Test connection
+        function testConnection() {
+            if (typeof zE === 'function') {
+                log('✓ zE function available', 'success');
+                
+                try {
+                    zE('messenger', function(data) {
+                        log('✓ Messenger accessible: ' + JSON.stringify(data), 'success');
+                    });
+                } catch (e) {
+                    log('✗ Messenger error: ' + e.message, 'error');
+                }
+            } else {
+                log('✗ zE not available', 'error');
+            }
+        }
+
+        // Logout
+        function logout() {
+            if (typeof zE === 'function') {
+                zE('messenger', 'logoutUser');
+            }
+            localStorage.clear();
+            window.location.href = '/login.html';
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            log('Page loaded, initializing...', 'info');
+            
+            // Wait for widget
+            let attempts = 0;
+            const waitForWidget = setInterval(function() {
+                attempts++;
+                if (typeof zE === 'function') {
+                    clearInterval(waitForWidget);
+                    log('✓ Zendesk widget loaded', 'success');
+                    updateStatus('pending', 'Widget loaded, authenticating...');
+                    
+                    // The widget will call fetchZendeskJWT automatically
+                    // But we can also try manual auth
+                    setTimeout(manualAuthenticate, 1000);
+                } else if (attempts >= 30) {
+                    clearInterval(waitForWidget);
+                    log('✗ Widget load timeout', 'error');
+                    updateStatus('error', 'Widget failed to load');
+                }
+            }, 500);
+        });
+    </script>
+</body>
+</html>
