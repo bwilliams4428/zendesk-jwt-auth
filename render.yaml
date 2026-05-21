@@ -1,9 +1,9 @@
 # Render Configuration for Zendesk JWT Auth
 #
 # This app works with ANY Zendesk account. Configuration can be done via:
-# 1. Environment variables (for production/Render)
-# 2. The /setup.html page (stores to config.json)
-# 3. Both (env vars take priority over config.json)
+# 1. Environment variables below (for production/Render)
+# 2. The /setup.html page (credentials stored in browser sessionStorage only)
+# Environment variables take priority over session credentials.
 
 services:
   - type: web
