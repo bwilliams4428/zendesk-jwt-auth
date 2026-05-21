@@ -1,62 +1,59 @@
 /**
  * Zendesk JWT Authentication - Client-side JavaScript
- * 
- * CRITICAL: The JWT token MUST be generated fresh when zE calls the loginUser callback.
- * Do NOT generate the token ahead of time - it must be requested at the moment of authentication.
- * 
- * Required JWT claims per Zendesk:
- * - iat: Issued at timestamp (REQUIRED)
- * - name: User's full name (REQUIRED)  
- * - email: User's email address (REQUIRED)
- * - external_id: Unique identifier from your system (REQUIRED)
- * - email_verified: Boolean indicating if email is verified (REQUIRED for verification)
- * - exp: Expiration timestamp (optional but recommended)
+ *
+ * Credentials are stored in browser sessionStorage ONLY.
+ * They are sent with each API request (never saved server-side)
+ * and vanish when the tab is closed.
  */
 
-// API base URL
-const API_BASE_URL = window.location.origin;
+var API_BASE_URL = window.location.origin;
+var STORAGE_KEY = 'zendesk_config';
 
 // Debug logging
-const DEBUG = true;
-function log(message, type = 'info') {
-    const timestamp = new Date().toLocaleTimeString();
-    const prefix = `[${timestamp}]`;
-    
+var DEBUG = true;
+function log(message, type) {
+    type = type || 'info';
+    var timestamp = new Date().toLocaleTimeString();
+
     if (DEBUG) {
-        const emoji = type === 'error' ? '🔴' : type === 'success' ? '🟢' : '🔵';
-        console.log(`${emoji} ${prefix} ${message}`);
+        var emoji = type === 'error' ? '🔴' : type === 'success' ? '🟢' : '🔵';
+        console.log(emoji + ' [' + timestamp + '] ' + message);
     }
-    
-    const debugLog = document.getElementById('debugLog');
+
+    var debugLog = document.getElementById('debugLog');
     if (debugLog) {
-        const color = type === 'error' ? '#ff6b6b' : type === 'success' ? '#51cf66' : '#d4d4d4';
-        const line = document.createElement('div');
+        var color = type === 'error' ? '#ff6b6b' : type === 'success' ? '#51cf66' : '#d4d4d4';
+        var line = document.createElement('div');
         line.style.color = color;
         line.style.marginBottom = '2px';
         line.style.fontSize = '11px';
-        line.textContent = `${prefix} ${message}`;
+        line.textContent = '[' + timestamp + '] ' + message;
         debugLog.appendChild(line);
         debugLog.scrollTop = debugLog.scrollHeight;
-        
-        // Limit log size
+
         while (debugLog.children.length > 100) {
             debugLog.removeChild(debugLog.firstChild);
         }
     }
 }
 
-// Demo credentials
-const DEMO_CREDENTIALS = {
-    email: 'user@example.com',
-    password: 'password123'
-};
+// ─── Session Config (ephemeral — sessionStorage only) ────────
+
+function getConfig() {
+    try {
+        var stored = sessionStorage.getItem(STORAGE_KEY);
+        return stored ? JSON.parse(stored) : null;
+    } catch (e) { return null; }
+}
+
+// ─── Session Storage ──────────────────────────────────────────
 
 function isLoggedIn() {
     return localStorage.getItem('userData') !== null;
 }
 
 function getUserData() {
-    const data = localStorage.getItem('userData');
+    var data = localStorage.getItem('userData');
     return data ? JSON.parse(data) : null;
 }
 
@@ -68,55 +65,59 @@ function clearUserData() {
     localStorage.removeItem('userData');
 }
 
+// ─── Status Updates ────────────────────────────────────────────
+
 function showError(message) {
-    const errorElement = document.getElementById('errorMessage');
+    var errorElement = document.getElementById('errorMessage');
     if (errorElement) {
         errorElement.textContent = message;
         errorElement.classList.add('show');
-        setTimeout(() => {
-            errorElement.classList.remove('show');
-        }, 5000);
+        setTimeout(function () { errorElement.classList.remove('show'); }, 5000);
     }
 }
 
 function updateAuthStatus(status, message) {
-    const statusBadge = document.getElementById('authStatus');
-    const statusText = document.getElementById('authStatusText');
-    
+    var statusBadge = document.getElementById('authStatus');
+    var statusText = document.getElementById('authStatusText');
+
     if (statusBadge && statusText) {
         statusBadge.className = 'status-badge ' + status;
         statusText.textContent = message;
-        log(`Status: ${message}`, status === 'authenticated' ? 'success' : 'info');
+        log('Status: ' + message, status === 'authenticated' ? 'success' : 'info');
     }
 }
 
-/**
- * Fetch fresh JWT token from server
- * CRITICAL: Must be called at authentication time, not before
- */
+// ─── JWT Token ─────────────────────────────────────────────────
+
 async function fetchFreshJwtToken(userData) {
+    var config = getConfig();
+    if (!config || !config.jwtSecret || !config.kid) {
+        log('No credentials — visit /setup.html first', 'error');
+        return null;
+    }
+
     try {
         log('Requesting fresh JWT token from server...');
-        
-        const response = await fetch(`${API_BASE_URL}/api/auth/token`, {
+
+        var response = await fetch(API_BASE_URL + '/api/auth/token', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 userId: userData.id,
                 email: userData.email,
-                name: userData.name
+                name: userData.name,
+                jwtSecret: config.jwtSecret,
+                kid: config.kid
             })
         });
-        
+
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Server error: ${response.status} - ${errorText}`);
+            var errorText = await response.text();
+            throw new Error('Server error: ' + response.status + ' - ' + errorText);
         }
-        
-        const data = await response.json();
-        
+
+        var data = await response.json();
+
         if (data.status === 'success' && data.token) {
             log('Fresh JWT token received', 'success');
             return data.token;
@@ -124,161 +125,83 @@ async function fetchFreshJwtToken(userData) {
             throw new Error(data.message || 'Token generation failed');
         }
     } catch (error) {
-        log(`Token fetch error: ${error.message}`, 'error');
+        log('Token fetch error: ' + error.message, 'error');
         return null;
     }
 }
 
-/**
- * Set up Zendesk widget authentication
- * 
- * IMPORTANT: The zE('messenger', 'loginUser') must be called with a function
- * that fetches a FRESH token when invoked. Pre-generating the token will fail.
- */
+// ─── Zendesk Authentication ────────────────────────────────────
+
 async function setupZendeskAuthentication() {
-    const userData = getUserData();
-    
+    var userData = getUserData();
+
     if (!userData) {
         log('No user data - cannot authenticate', 'error');
         updateAuthStatus('unauthenticated', 'Not logged in');
         return;
     }
-    
+
     if (typeof zE !== 'function') {
-        log('zE not available - widget not loaded', 'error');
+        log('zE not available - widget not loaded (check /setup.html)', 'error');
         updateAuthStatus('unauthenticated', 'Widget not loaded');
         return;
     }
-    
+
     updateAuthStatus('pending', 'Setting up authentication...');
-    
+
     try {
         log('Configuring Zendesk widget authentication...');
-        
-        // THIS IS THE CRITICAL PART:
-        // The loginUser callback is invoked by Zendesk when authentication is needed
-        // We MUST return a fresh token at that moment
+
         zE('messenger', 'loginUser', async function requestToken(callback) {
             log('Zendesk requesting JWT token...');
-            
-            // Fetch a FRESH token at the moment of authentication
-            const token = await fetchFreshJwtToken(userData);
-            
+
+            var token = await fetchFreshJwtToken(userData);
+
             if (token) {
                 log('Providing fresh JWT token to Zendesk', 'success');
-                // Pass the token to Zendesk via the callback
                 callback(token);
                 updateAuthStatus('authenticated', 'Authenticated with JWT');
             } else {
                 log('Failed to get token - authentication will fail', 'error');
-                // Call with null to indicate failure
                 callback(null);
                 updateAuthStatus('error', 'Authentication failed');
             }
         });
-        
-        // Also set conversation fields to pass user info
-        zE('messenger:set', {
-            conversationFields: [
-                { id: 'name', value: userData.name },
-                { id: 'email', value: userData.email }
-            ]
-        });
-        
+
         log('Widget authentication configured', 'success');
-        
+
     } catch (error) {
-        log(`Authentication setup error: ${error.message}`, 'error');
+        log('Authentication setup error: ' + error.message, 'error');
         updateAuthStatus('error', 'Setup failed: ' + error.message);
     }
 }
 
-/**
- * Manually trigger authentication (for testing)
- */
-async function forceAuthentication() {
-    log('Forcing authentication...');
-    await setupZendeskAuthentication();
-}
+// ─── Page Routing ─────────────────────────────────────────────
 
-/**
- * Test widget connection
- */
-function testWidgetConnection() {
-    log('Testing widget connection...');
-    
-    if (typeof zE !== 'function') {
-        log('❌ zE not defined - Widget script not loaded', 'error');
-        return false;
-    }
-    
-    log('✅ zE is available', 'success');
-    
-    try {
-        zE('messenger', function(data) {
-            log('✅ Messenger is accessible', 'success');
-            log('Messenger data: ' + JSON.stringify(data));
-        });
-        return true;
-    } catch (error) {
-        log(`❌ Messenger error: ${error.message}`, 'error');
-        return false;
-    }
-}
-
-/**
- * Wait for Zendesk widget to be ready
- */
-function waitForWidget(callback, maxAttempts = 50) {
-    let attempts = 0;
-    
-    const checkWidget = () => {
-        attempts++;
-        
-        if (typeof zE === 'function') {
-            log('✅ Zendesk widget ready', 'success');
-            callback(true);
-        } else if (attempts >= maxAttempts) {
-            log('❌ Widget load timeout', 'error');
-            callback(false);
-        } else {
-            if (attempts === 1) {
-                log('Waiting for widget...');
-            }
-            setTimeout(checkWidget, 200);
-        }
-    };
-    
-    checkWidget();
-}
-
-/**
- * Handle login form
- */
 async function handleLogin(event) {
     event.preventDefault();
-    
-    const email = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
-    const button = document.getElementById('loginButton');
-    
+
+    var email = document.getElementById('email').value.trim();
+    var password = document.getElementById('password').value;
+    var button = document.getElementById('loginButton');
+
     if (!email || !password) {
         showError('Please enter both email and password');
         return;
     }
-    
+
     button.disabled = true;
     button.textContent = 'Signing in...';
-    
+
     try {
-        const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        var response = await fetch(API_BASE_URL + '/api/auth/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password })
+            body: JSON.stringify({ email: email, password: password })
         });
-        
-        const data = await response.json();
-        
+
+        var data = await response.json();
+
         if (data.status === 'success' && data.user) {
             saveUserData(data.user);
             log('Login successful', 'success');
@@ -287,122 +210,112 @@ async function handleLogin(event) {
             showError(data.message || 'Login failed');
         }
     } catch (error) {
-        log(`Login error: ${error.message}`, 'error');
-        showError('Login failed');
+        log('Login error: ' + error.message, 'error');
+        showError('Login failed — check if server is running');
     } finally {
         button.disabled = false;
         button.textContent = 'Sign In';
     }
 }
 
-/**
- * Logout
- */
 async function handleLogout() {
     log('Logging out...');
-    
+
     if (typeof zE === 'function') {
-        try {
-            zE('messenger', 'logoutUser');
-            log('Widget logout successful');
-        } catch (error) {
-            log(`Widget logout error: ${error.message}`, 'error');
-        }
+        try { zE('messenger', 'logoutUser'); log('Widget logout successful'); }
+        catch (error) { log('Widget logout error: ' + error.message, 'error'); }
     }
-    
+
     clearUserData();
     window.location.href = 'login.html';
 }
 
-/**
- * Initialize login page
- */
+// ─── Initialization ────────────────────────────────────────────
+
 function initLoginPage() {
     log('Login page init');
-    
-    const emailInput = document.getElementById('email');
-    const passwordInput = document.getElementById('password');
-    
-    if (emailInput && passwordInput) {
-        emailInput.value = DEMO_CREDENTIALS.email;
-        passwordInput.value = DEMO_CREDENTIALS.password;
-    }
-    
-    const form = document.getElementById('loginForm');
-    if (form) {
-        form.addEventListener('submit', handleLogin);
-    }
+
+    var emailInput = document.getElementById('email');
+    var passwordInput = document.getElementById('password');
+
+    if (emailInput) emailInput.value = 'user@example.com';
+    if (passwordInput) passwordInput.value = 'password123';
+
+    var form = document.getElementById('loginForm');
+    if (form) { form.addEventListener('submit', handleLogin); }
 }
 
-/**
- * Initialize dashboard
- */
 function initDashboardPage() {
     log('Dashboard init');
-    
-    const userData = getUserData();
-    
+
+    var userData = getUserData();
+
     if (!userData) {
-        log('No user session', 'error');
-        const overlay = document.getElementById('authOverlay');
-        if (overlay) overlay.style.display = 'flex';
+        log('No user session — redirecting to login');
+        window.location.href = 'login.html';
         return;
     }
-    
-    // Display user info
-    const elements = {
+
+    var elements = {
         displayName: document.getElementById('displayName'),
         displayEmail: document.getElementById('displayEmail'),
         userName: document.getElementById('userName'),
         userEmail: document.getElementById('userEmail'),
         userId: document.getElementById('userId')
     };
-    
+
     if (elements.displayName) elements.displayName.textContent = userData.name;
     if (elements.displayEmail) elements.displayEmail.textContent = userData.email;
     if (elements.userName) elements.userName.textContent = userData.name;
     if (elements.userEmail) elements.userEmail.textContent = userData.email;
     if (elements.userId) elements.userId.textContent = userData.id;
-    
-    log(`User: ${userData.name} (${userData.email})`);
-    
-    // Attach handlers
-    const logoutBtn = document.getElementById('logoutButton');
-    const authBtn = document.getElementById('authWidgetBtn');
-    const testBtn = document.getElementById('testWidgetBtn');
-    
+
+    log('User: ' + userData.name + ' (' + userData.email + ')');
+
+    var logoutBtn = document.getElementById('logoutButton');
+    var authBtn = document.getElementById('authWidgetBtn');
+    var testBtn = document.getElementById('testWidgetBtn');
+
     if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
-    if (authBtn) authBtn.addEventListener('click', forceAuthentication);
-    if (testBtn) testBtn.addEventListener('click', testWidgetConnection);
-    
-    // Wait for widget then set up auth
-    waitForWidget((ready) => {
-        if (ready) {
-            testWidgetConnection();
-            // Setup authentication immediately
-            setupZendeskAuthentication();
-        }
+    if (authBtn) authBtn.addEventListener('click', setupZendeskAuthentication);
+    if (testBtn) testBtn.addEventListener('click', function () {
+        if (typeof zE === 'function') { log('✓ zE is available', 'success'); }
+        else { log('✗ zE not defined', 'error'); }
     });
+
+    if (typeof onZendeskWidgetReady === 'function') {
+        onZendeskWidgetReady(function () {
+            log('✓ Widget ready, setting up auth', 'success');
+            setupZendeskAuthentication();
+        });
+    } else {
+        var attempts = 0;
+        var check = setInterval(function () {
+            attempts++;
+            if (typeof zE === 'function') {
+                clearInterval(check);
+                log('✓ Zendesk widget loaded', 'success');
+                setupZendeskAuthentication();
+            } else if (attempts > 50) {
+                clearInterval(check);
+                log('✗ Widget load timeout', 'error');
+            }
+        }, 200);
+    }
 }
 
-/**
- * Main init
- */
 function init() {
-    const currentPage = window.location.pathname.split('/').pop() || 'index.html';
-    
+    var currentPage = window.location.pathname.split('/').pop() || 'index.html';
+
     if (currentPage === 'login.html' || currentPage === '') {
         initLoginPage();
+    } else if (currentPage === 'setup.html') {
+        // Setup page has its own JS
     } else {
-        if (!isLoggedIn() && currentPage !== 'login.html') {
-            window.location.href = 'login.html';
-            return;
-        }
         initDashboardPage();
     }
 }
 
-// Start
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
 } else {
@@ -411,9 +324,9 @@ if (document.readyState === 'loading') {
 
 // Expose for debugging
 window.zendeskAuthDebug = {
-    getUserData,
-    fetchFreshJwtToken,
-    setupZendeskAuthentication,
-    testWidgetConnection,
-    log
+    getUserData: getUserData,
+    getConfig: getConfig,
+    fetchFreshJwtToken: fetchFreshJwtToken,
+    setupZendeskAuthentication: setupZendeskAuthentication,
+    log: log
 };

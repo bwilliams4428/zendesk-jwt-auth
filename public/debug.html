@@ -4,107 +4,145 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Zendesk JWT Debug</title>
-    <style>
-        body { font-family: sans-serif; max-width: 900px; margin: 20px auto; padding: 20px; background: #f5f5f5; }
-        .card { background: white; padding: 20px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        h2 { color: #333; margin-top: 0; }
-        .btn { background: #667eea; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; margin: 5px; }
-        .btn:hover { background: #5a67d8; }
-        pre { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 12px; }
-        .success { color: #4caf50; }
-        .error { color: #f44336; }
-        .warning { color: #ff9800; }
-        input { padding: 8px; margin: 5px; width: 300px; }
-        label { display: block; margin: 10px 0 5px; font-weight: bold; }
-    </style>
+    <link rel="stylesheet" href="/css/radix-theme.css">
 </head>
 <body>
-    <h1>🔐 Zendesk JWT Authentication Debugger</h1>
+    <nav class="navbar">
+        <a href="/" class="navbar-brand">🔐 Zendesk JWT Auth</a>
+        <div class="navbar-links">
+            <a href="/setup.html">⚙️ Configuration</a>
+            <a href="/">🏠 Home</a>
+        </div>
+    </nav>
 
-    <div class="card">
-        <h2>Step 1: Generate JWT Token</h2>
-        <label>User ID:</label>
-        <input type="text" id="userId" value="user_12345">
-        
-        <label>Name:</label>
-        <input type="text" id="userName" value="Demo User">
-        
-        <label>Email:</label>
-        <input type="email" id="userEmail" value="user@example.com">
-        
-        <button class="btn" onclick="generateToken()">Generate JWT</button>
-        
-        <div id="tokenResult" style="margin-top: 20px; display: none;">
-            <h3>Generated Token:</h3>
-            <pre id="jwtToken"></pre>
-            
-            <h3>Decoded Payload:</h3>
-            <pre id="jwtPayload"></pre>
-            
-            <button class="btn" onclick="verifyToken()">Verify Token on Server</button>
-            <div id="verifyResult"></div>
+    <div class="page-container">
+        <div class="callout callout-privacy">
+            🔒 Credentials live in browser sessionStorage only — never stored on any server. Gone when you close this tab.
+        </div>
+
+        <div id="configWarning" class="callout callout-warning" style="display:none;">
+            ⚠️ No Zendesk credentials found. <a href="/setup.html">Enter your credentials</a> to get started.
+        </div>
+
+        <h1>🔐 Zendesk JWT Authentication Debugger</h1>
+
+        <div class="card animate-in">
+            <h2>Step 1: Generate JWT Token</h2>
+            <div class="form-group">
+                <label class="form-label" for="userId">User ID</label>
+                <input class="form-field" type="text" id="userId" value="user_12345">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="userName">Name</label>
+                <input class="form-field" type="text" id="userName" value="Demo User">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="userEmail">Email</label>
+                <input class="form-field" type="email" id="userEmail" value="user@example.com">
+            </div>
+
+            <button class="btn btn-primary" onclick="generateToken()">Generate JWT</button>
+
+            <div id="tokenResult" style="margin-top: var(--space-5); display: none;">
+                <h3>Generated Token:</h3>
+                <pre id="jwtToken"></pre>
+
+                <h3>Decoded Payload:</h3>
+                <pre id="jwtPayload"></pre>
+
+                <button class="btn btn-secondary" onclick="verifyToken()">Verify Token on Server</button>
+                <div id="verifyResult"></div>
+            </div>
+        </div>
+
+        <div class="card animate-in">
+            <h2>Step 2: Authenticate with Zendesk</h2>
+            <p>Click the button below to authenticate the Zendesk widget with the JWT token.</p>
+
+            <button class="btn btn-primary" onclick="authenticateZendesk()">Authenticate Widget</button>
+            <button class="btn btn-secondary" onclick="testWidget()">Test Widget Connection</button>
+
+            <div id="authResult" style="margin-top: var(--space-4);"></div>
+        </div>
+
+        <div class="card animate-in">
+            <h2>Debug Log</h2>
+            <div id="debugLog" class="debug-log">Waiting for actions...</div>
         </div>
     </div>
 
-    <div class="card">
-        <h2>Step 2: Authenticate with Zendesk</h2>
-        <p>Click the button below to authenticate the Zendesk widget with the JWT token.</p>
-        
-        <button class="btn" onclick="authenticateZendesk()">Authenticate Widget</button>
-        <button class="btn" onclick="testWidget()" style="background: #6c757d;">Test Widget Connection</button>
-        
-        <div id="authResult" style="margin-top: 20px;"></div>
-    </div>
-
-    <div class="card">
-        <h2>Debug Log</h2>
-        <pre id="debugLog">Waiting for actions...</pre>
-    </div>
-
-    <!-- Zendesk Widget -->
-    <script id="ze-snippet" src="https://static.zdassets.com/ekr/snippet.js?key=8b5a738b-fb7a-42c5-95a6-1cb26e82900a"></script>
+    <script src="/js/zendesk-loader.js"></script>
 
     <script>
-        const API_URL = window.location.origin;
-        let currentToken = null;
+        var API_URL = window.location.origin;
+        var STORAGE_KEY = 'zendesk_config';
+        var currentToken = null;
 
-        function log(msg, type = 'info') {
-            const time = new Date().toLocaleTimeString();
-            const logDiv = document.getElementById('debugLog');
-            const color = type === 'error' ? '#f44336' : type === 'success' ? '#4caf50' : '#d4d4d4';
-            logDiv.innerHTML += `\u003cspan style="color: ${color}">[${time}] ${msg}\u003c/span\u003e\n`;
-            console.log(`[${time}] ${msg}`);
+        function getConfig() {
+            try {
+                var stored = sessionStorage.getItem(STORAGE_KEY);
+                return stored ? JSON.parse(stored) : null;
+            } catch (e) { return null; }
+        }
+
+        function checkConfig() {
+            var config = getConfig();
+            var warning = document.getElementById('configWarning');
+            if (!config || !config.jwtSecret || !config.kid || !config.widgetKey) {
+                warning.style.display = 'block';
+            } else {
+                warning.style.display = 'none';
+            }
+        }
+
+        function log(msg, type) {
+            type = type || 'info';
+            var time = new Date().toLocaleTimeString();
+            var logDiv = document.getElementById('debugLog');
+            var cssClass = type === 'error' ? 'log-error' : type === 'success' ? 'log-success' : 'log-info';
+            logDiv.innerHTML += '<div class="' + cssClass + '">[' + time + '] ' + msg + '</div>';
+            console.log('[' + time + '] ' + msg);
         }
 
         async function generateToken() {
-            const userId = document.getElementById('userId').value;
-            const name = document.getElementById('userName').value;
-            const email = document.getElementById('userEmail').value;
+            var userId = document.getElementById('userId').value;
+            var name = document.getElementById('userName').value;
+            var email = document.getElementById('userEmail').value;
+            var config = getConfig();
+
+            if (!config || !config.jwtSecret || !config.kid) {
+                log('No credentials — visit /setup.html first', 'error');
+                return;
+            }
 
             log('Generating JWT token...');
 
             try {
-                const response = await fetch(`${API_URL}/api/auth/token`, {
+                var response = await fetch(API_URL + '/api/auth/token', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ userId, name, email })
+                    body: JSON.stringify({
+                        userId: userId, name: name, email: email,
+                        jwtSecret: config.jwtSecret, kid: config.kid
+                    })
                 });
 
-                const data = await response.json();
+                var data = await response.json();
 
                 if (data.token) {
                     currentToken = data.token;
                     document.getElementById('jwtToken').textContent = data.token;
-                    
-                    // Decode payload
-                    const parts = data.token.split('.');
-                    const payload = JSON.parse(atob(parts[1]));
+
+                    var parts = data.token.split('.');
+                    var payload = JSON.parse(atob(parts[1]));
                     document.getElementById('jwtPayload').textContent = JSON.stringify(payload, null, 2);
-                    
+
                     document.getElementById('tokenResult').style.display = 'block';
                     log('Token generated successfully', 'success');
                 } else {
-                    log('Failed to generate token: ' + data.message, 'error');
+                    log('Failed: ' + (data.message || 'Unknown error'), 'error');
                 }
             } catch (error) {
                 log('Error: ' + error.message, 'error');
@@ -112,28 +150,27 @@
         }
 
         async function verifyToken() {
-            if (!currentToken) {
-                log('No token to verify', 'error');
-                return;
-            }
+            if (!currentToken) { log('No token to verify', 'error'); return; }
+            var config = getConfig();
+            if (!config || !config.jwtSecret) { log('No JWT secret for verification', 'error'); return; }
 
             log('Verifying token on server...');
 
             try {
-                const response = await fetch(`${API_URL}/api/auth/verify`, {
+                var response = await fetch(API_URL + '/api/auth/verify', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token: currentToken })
+                    body: JSON.stringify({ token: currentToken, jwtSecret: config.jwtSecret })
                 });
 
-                const data = await response.json();
-                const resultDiv = document.getElementById('verifyResult');
+                var data = await response.json();
+                var resultDiv = document.getElementById('verifyResult');
 
                 if (data.valid) {
-                    resultDiv.innerHTML = `\u003cdiv class="success">✓ Token is valid\u003c/div\u003e\u003cpre\u003e${JSON.stringify(data.decoded, null, 2)}\u003c/pre\u003e`;
+                    resultDiv.innerHTML = '<div class="callout callout-success">✓ Token is valid</div><pre>' + JSON.stringify(data.decoded, null, 2) + '</pre>';
                     log('Token verified successfully', 'success');
                 } else {
-                    resultDiv.innerHTML = `\u003cdiv class="error">✗ Token invalid: ${data.message}\u003c/div\u003e`;
+                    resultDiv.innerHTML = '<div class="callout callout-error">✗ Token invalid: ' + data.message + '</div>';
                     log('Token verification failed', 'error');
                 }
             } catch (error) {
@@ -142,57 +179,54 @@
         }
 
         function testWidget() {
-            const resultDiv = document.getElementById('authResult');
-            
+            var resultDiv = document.getElementById('authResult');
+
             if (typeof zE !== 'function') {
-                resultDiv.innerHTML = '\u003cdiv class="error">✗ zE not available - widget not loaded\u003c/div\u003e';
+                resultDiv.innerHTML = '<div class="callout callout-error">✗ zE not available — widget not configured or not loaded. Visit <a href="/setup.html">/setup.html</a></div>';
                 log('Widget not loaded', 'error');
                 return;
             }
 
-            resultDiv.innerHTML = '\u003cdiv class="success">✓ zE is available\u003c/div\u003e';
+            resultDiv.innerHTML = '<div class="callout callout-success">✓ zE is available</div>';
             log('Widget is available', 'success');
 
-            // Try to access messenger
             try {
                 zE('messenger', function(data) {
                     log('Messenger accessible: ' + JSON.stringify(data), 'success');
-                    resultDiv.innerHTML += '\u003cdiv class="success">✓ Messenger API accessible\u003c/div\u003e';
+                    resultDiv.innerHTML += '<div class="callout callout-success">✓ Messenger API accessible</div>';
                 });
             } catch (e) {
                 log('Messenger error: ' + e.message, 'error');
-                resultDiv.innerHTML += '\u003cdiv class="error">✗ Messenger API error: ' + e.message + '\u003c/div\u003e';
+                resultDiv.innerHTML += '<div class="callout callout-error">✗ Messenger API error: ' + e.message + '</div>';
             }
         }
 
         function authenticateZendesk() {
-            const resultDiv = document.getElementById('authResult');
+            var resultDiv = document.getElementById('authResult');
 
             if (!currentToken) {
-                resultDiv.innerHTML = '\u003cdiv class="error">✗ Please generate a token first\u003c/div\u003e';
+                resultDiv.innerHTML = '<div class="callout callout-error">✗ Please generate a token first</div>';
                 log('No token available', 'error');
                 return;
             }
 
             if (typeof zE !== 'function') {
-                resultDiv.innerHTML = '\u003cdiv class="error">✗ Widget not loaded\u003c/div\u003e';
+                resultDiv.innerHTML = '<div class="callout callout-error">✗ Widget not loaded — check configuration at <a href="/setup.html">/setup.html</a></div>';
                 log('Widget not loaded', 'error');
                 return;
             }
 
             log('Authenticating with zE("messenger", "loginUser")...');
-            resultDiv.innerHTML = '\u003cdiv class="warning">⏳ Authenticating...\u003c/div\u003e';
+            resultDiv.innerHTML = '<div class="callout callout-warning">⏳ Authenticating...</div>';
 
-            // Method 1: Using loginUser with callback
             zE("messenger", "loginUser", function (callback) {
                 log('Zendesk login callback invoked');
                 callback(currentToken);
                 log('Token provided to Zendesk', 'success');
-                resultDiv.innerHTML = '\u003cdiv class="success">✓ Token sent to Zendesk\u003c/div\u003e';
+                resultDiv.innerHTML = '<div class="callout callout-success">✓ Token sent to Zendesk</div>';
             });
 
-            // Also try setting user info
-            setTimeout(() => {
+            setTimeout(function() {
                 try {
                     zE('messenger:set', {
                         conversationFields: [
@@ -207,24 +241,12 @@
             }, 500);
         }
 
-        // Auto-generate token on load
-        window.onload = function() {
-            log('Page loaded, waiting for widget...');
-            
-            let attempts = 0;
-            const checkWidget = setInterval(() => {
-                attempts++;
-                if (typeof zE === 'function') {
-                    clearInterval(checkWidget);
-                    log('Widget loaded (zE available)', 'success');
-                    // Auto-generate token
-                    setTimeout(generateToken, 500);
-                } else if (attempts > 60) {
-                    clearInterval(checkWidget);
-                    log('Widget load timeout', 'error');
-                }
-            }, 500);
-        };
+        checkConfig();
+
+        onZendeskWidgetReady(function () {
+            log('✓ Zendesk widget loaded', 'success');
+            setTimeout(generateToken, 500);
+        });
     </script>
 </body>
 </html>

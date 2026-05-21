@@ -4,198 +4,56 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - Zendesk JWT Auth Demo</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .login-container {
-            background: white;
-            padding: 3rem;
-            border-radius: 12px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-            width: 100%;
-            max-width: 400px;
-        }
-
-        .logo {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-
-        .logo svg {
-            width: 60px;
-            height: 60px;
-        }
-
-        h1 {
-            color: #333;
-            font-size: 1.75rem;
-            text-align: center;
-            margin-bottom: 0.5rem;
-        }
-
-        .subtitle {
-            color: #666;
-            text-align: center;
-            margin-bottom: 2rem;
-            font-size: 0.95rem;
-        }
-
-        .form-group {
-            margin-bottom: 1.5rem;
-        }
-
-        label {
-            display: block;
-            color: #333;
-            font-weight: 500;
-            margin-bottom: 0.5rem;
-            font-size: 0.9rem;
-        }
-
-        input {
-            width: 100%;
-            padding: 0.875rem 1rem;
-            border: 2px solid #e1e1e1;
-            border-radius: 8px;
-            font-size: 1rem;
-            transition: border-color 0.2s;
-        }
-
-        input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
-        button {
-            width: 100%;
-            padding: 1rem;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        button:hover {
-            background: #5568d3;
-        }
-
-        button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-
-        .error-message {
-            background: #feebeb;
-            color: #dc3545;
-            padding: 0.875rem;
-            border-radius: 8px;
-            margin-bottom: 1rem;
-            display: none;
-        }
-
-        .error-message.show {
-            display: block;
-        }
-
-        .demo-info {
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            border-radius: 8px;
-            padding: 1rem;
-            margin-top: 1.5rem;
-            font-size: 0.85rem;
-        }
-
-        .demo-info strong {
-            color: #333;
-        }
-
-        .demo-info code {
-            background: #e9ecef;
-            padding: 0.2rem 0.4rem;
-            border-radius: 4px;
-            font-family: 'Monaco', 'Menlo', monospace;
-        }
-
-        .spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid #fff;
-            border-top-color: transparent;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            margin-right: 0.5rem;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-    </style>
+    <link rel="stylesheet" href="/css/radix-theme.css">
 </head>
-<body>
-    <div class="login-container">
-        <div class="logo">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="#667eea"/>
-                <path d="M2 17L12 22L22 17" stroke="#667eea" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M2 12L12 17L22 12" stroke="#667eea" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<body class="setup-page">
+    <div class="setup-card animate-in">
+        <div class="setup-logo">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="60" height="60">
+                <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="var(--primary-bg)"/>
+                <path d="M2 17L12 22L22 17" stroke="var(--primary-bg)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M2 12L12 17L22 12" stroke="var(--primary-bg)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
         </div>
-        
-        <h1>Welcome Back</h1>
-        <p class="subtitle">Sign in to access the Zendesk messaging widget</p>
-        
-        <div id="errorMessage" class="error-message"></div>
-        
+
+        <h1 class="setup-title">Welcome Back</h1>
+        <p class="setup-subtitle">Sign in to access the Zendesk messaging widget</p>
+
+        <div id="errorMessage" class="callout callout-error" style="display:none;"></div>
+
         <form id="loginForm">
             <div class="form-group">
-                <label for="email">Email</label>
-                <input 
-                    type="email" 
-                    id="email" 
-                    name="email" 
+                <label class="form-label" for="email">Email</label>
+                <input
+                    class="form-field"
+                    type="email"
+                    id="email"
+                    name="email"
                     placeholder="you@example.com"
                     required
                     autocomplete="email"
                 >
             </div>
-            
+
             <div class="form-group">
-                <label for="password">Password</label>
-                <input 
-                    type="password" 
-                    id="password" 
-                    name="password" 
+                <label class="form-label" for="password">Password</label>
+                <input
+                    class="form-field"
+                    type="password"
+                    id="password"
+                    name="password"
                     placeholder="Enter your password"
                     required
                     autocomplete="current-password"
                 >
             </div>
-            
-            <button type="submit" id="loginButton">
+
+            <button type="submit" id="loginButton" class="btn btn-primary btn-block btn-lg">
                 Sign In
             </button>
         </form>
-        
-        <div class="demo-info">
+
+        <div class="callout callout-info" style="margin-top: var(--space-5);">
             <strong>Demo Credentials:</strong><br>
             Email: <code>user@example.com</code><br>
             Password: <code>password123</code>

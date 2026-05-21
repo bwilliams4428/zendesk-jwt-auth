@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Setup - Zendesk JWT Auth</title>
+    <link rel="stylesheet" href="/css/radix-theme.css">
+</head>
+<body class="setup-page">
+    <div class="setup-card animate-in">
+        <div class="setup-logo">⚙️</div>
+        <h1 class="setup-title">Zendesk JWT Auth Setup</h1>
+        <p class="setup-subtitle">Configure your Zendesk account — works with any messaging widget</p>
+
+        <div class="callout callout-privacy">
+            <strong>🔒 Privacy:</strong> Your credentials are stored in your browser's
+            <em>sessionStorage</em> only — they are never saved to any server or disk.
+            They disappear automatically when you close this browser tab.
+        </div>
+
+        <div id="statusMessage"></div>
+
+        <!-- ──────── INSTRUCTIONS ──────── -->
+        <div class="instructions">
+            <h3>📍 How to find your Zendesk Conversations API key</h3>
+            <p>
+                A Conversations API key has three pieces:
+                <strong>App ID</strong> (your account identifier),
+                <strong>Key ID</strong> (included in your JWT header as <code>kid</code>), and
+                <strong>Secret key</strong> (used to sign your JWT).
+            </p>
+            <ol>
+                <li>
+                    In <strong>Zendesk Admin Center</strong>, go to
+                    <strong>Apps and integrations → APIs → Conversations API</strong><br>
+                    <span class="text-muted" style="font-size:0.8rem;">Requires Zendesk Suite Professional plan or above</span>
+                </li>
+                <li>Click <strong>"Add key"</strong> (or "Create new key")</li>
+                <li>Enter a descriptive name (e.g. <code>jwt-auth-app</code>) and click <strong>Create</strong></li>
+                <li>
+                    In the dialog that appears, copy the values:
+                    <ul style="margin-top:0.3rem;">
+                        <li><strong>Key ID</strong> — looks like <code style="font-size:0.8rem;">app_67097c94d8a020e6a236ae87</code></li>
+                        <li><strong>Secret key</strong> — a long random string</li>
+                    </ul>
+                </li>
+                <li>
+                    For the <strong>Widget Key</strong>, go to
+                    <strong>Channels → Messaging and Social → Messaging</strong>,
+                    click on your messaging widget link, then go to
+                    <strong>Installation</strong>. Copy the <code>key=</code> value from the snippet:
+                    <div class="snippet">
+                        <span class="comment">&lt;!-- The widget key is the value after key= --&gt;</span><br>
+                        &lt;script id="ze-snippet"<br>
+                        &nbsp;&nbsp;src="https://static.zdassets.com/ekr/snippet.js?key=<span class="key-part">your_widget_key_here</span>"&gt;<br>
+                        &lt;/script&gt;
+                    </div>
+                </li>
+            </ol>
+            <div class="note">
+                ⚠️ <strong>Important:</strong> The secret key is only shown once when you create it. If you lose it, you'll need to create a new key. For more details, see the
+                <a href="https://support.zendesk.com/hc/en-us/articles/4576088682266-Using-the-Conversations-API-keys" target="_blank">Zendesk Conversations API keys documentation</a>.
+            </div>
+        </div>
+
+        <hr class="separator">
+
+        <form id="setupForm">
+            <div class="h3" style="margin-bottom: var(--space-4);">🔑 Zendesk Credentials</div>
+
+            <div class="form-group">
+                <label class="form-label" for="widgetKey">Widget Key <span class="form-hint">(required)</span></label>
+                <input class="form-field" type="text" id="widgetKey" placeholder="e.g. 8b5a738b-fb7a-42c5-95a6-1cb26e82900a" required>
+                <div class="form-field-help">Found in Channels → Messaging and Social → Messaging → your widget → Installation (the <code>key=</code> value in the snippet)</div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="kid">Key ID <span class="form-hint">(required)</span></label>
+                <input class="form-field" type="text" id="kid" placeholder="e.g. app_67097c94d8a020e6a236ae87" required>
+                <div class="form-field-help">Created in Apps and integrations → APIs → Conversations API. Used as the <code>kid</code> in your JWT header.</div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="jwtSecret">Secret Key <span class="form-hint">(required)</span></label>
+                <input class="form-field" type="password" id="jwtSecret" placeholder="Paste your secret key here" required>
+                <div class="text-success" style="margin-top: var(--space-1); font-size: var(--font-size-2);">
+                    🔒 Sent only to the server during token generation — never stored server-side.
+                </div>
+                <div class="form-field-help">Created alongside the Key ID. Shown only once — if lost, create a new key.</div>
+            </div>
+
+            <hr class="separator">
+
+            <div class="h3" style="margin-bottom: var(--space-4);">🌐 Account (Optional)</div>
+
+            <div class="form-group">
+                <label class="form-label" for="account">Zendesk Subdomain</label>
+                <input class="form-field" type="text" id="account" placeholder="e.g. mycompany.zendesk.com">
+            </div>
+
+            <button type="submit" id="saveBtn" class="btn btn-primary btn-block btn-lg">Save & Launch</button>
+        </form>
+
+        <button type="button" id="clearBtn" class="btn btn-danger btn-block">🗑️ Clear All Data (erase credentials)</button>
+
+        <a href="/" class="text-accent" style="display:block; text-align:center; margin-top: var(--space-4);">Skip setup — use environment variables instead</a>
+    </div>
+
+    <script>
+        var STORAGE_KEY = 'zendesk_config';
+
+        function showStatus(msg, type) {
+            var el = document.getElementById('statusMessage');
+            el.className = 'callout callout-' + type;
+            el.textContent = msg;
+        }
+
+        function getConfig() {
+            try {
+                var stored = sessionStorage.getItem(STORAGE_KEY);
+                return stored ? JSON.parse(stored) : null;
+            } catch (e) { return null; }
+        }
+
+        function saveConfig(config) {
+            sessionStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+        }
+
+        function clearConfig() {
+            sessionStorage.removeItem(STORAGE_KEY);
+        }
+
+        // Pre-fill if config exists
+        function loadExisting() {
+            var config = getConfig();
+            if (config) {
+                if (config.widgetKey) document.getElementById('widgetKey').value = config.widgetKey;
+                if (config.kid) document.getElementById('kid').value = config.kid;
+                if (config.account) document.getElementById('account').value = config.account || '';
+                // Don't pre-fill the secret (it's a password field)
+                if (config.jwtSecret) {
+                    document.getElementById('jwtSecret').placeholder = '•••••••• (already stored — re-enter to change)';
+                }
+                showStatus('✓ Credentials loaded from this session. They will be erased when you close this tab.', 'info');
+            }
+        }
+
+        function handleSetup(event) {
+            event.preventDefault();
+
+            var widgetKey = document.getElementById('widgetKey').value.trim();
+            var kid = document.getElementById('kid').value.trim();
+            var jwtSecret = document.getElementById('jwtSecret').value.trim();
+            var account = document.getElementById('account').value.trim();
+
+            if (!widgetKey || !kid || !jwtSecret) {
+                showStatus('Widget Key, Key ID, and Secret Key are all required.', 'error');
+                return;
+            }
+
+            // Store in sessionStorage only — cleared on tab close
+            var existing = getConfig() || {};
+            saveConfig({
+                widgetKey: widgetKey,
+                kid: kid,
+                jwtSecret: jwtSecret,
+                account: account || existing.account || ''
+            });
+
+            showStatus('✓ Credentials saved to browser session! Redirecting...', 'success');
+
+            // Reload the widget loader with new config
+            setTimeout(function () {
+                window.location.href = '/';
+            }, 1000);
+        }
+
+        function handleClear() {
+            clearConfig();
+            document.getElementById('widgetKey').value = '';
+            document.getElementById('kid').value = '';
+            document.getElementById('jwtSecret').value = '';
+            document.getElementById('account').value = '';
+            document.getElementById('jwtSecret').placeholder = 'Paste your secret key here';
+            showStatus('🗑️ All credentials erased from browser sessionStorage.', 'info');
+        }
+
+        document.getElementById('setupForm').addEventListener('submit', handleSetup);
+        document.getElementById('clearBtn').addEventListener('click', handleClear);
+
+        loadExisting();
+    </script>
+</body>
+</html>

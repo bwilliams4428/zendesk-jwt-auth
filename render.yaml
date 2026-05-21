@@ -1,4 +1,9 @@
 # Render Configuration for Zendesk JWT Auth
+#
+# This app works with ANY Zendesk account. Configuration can be done via:
+# 1. Environment variables (for production/Render)
+# 2. The /setup.html page (stores to config.json)
+# 3. Both (env vars take priority over config.json)
 
 services:
   - type: web
@@ -11,11 +16,12 @@ services:
         value: production
       - key: PORT
         value: 10000
+      # Required: Set these in Render dashboard OR via /setup.html after deploy
       - key: ZENDESK_JWT_SECRET
-        sync: false  # Set this in Render dashboard
-      - key: ZENDESW_KID
-        sync: false  # Set this in Render dashboard
+        sync: false  # Your Zendesk JWT shared secret
+      - key: ZENDESK_KID
+        sync: false  # Your Zendesk Key ID (kid) from JWT settings
       - key: ZENDESK_WIDGET_KEY
-        sync: false  # Set this in Render dashboard
+        sync: false  # Your Zendesk web widget key
       - key: ZENDESK_ACCOUNT
-        value: z3nbwilliams.zendesk.com
+        sync: false  # Your Zendesk subdomain (e.g. mycompany.zendesk.com)
