@@ -91,11 +91,12 @@
 
             <hr class="separator">
 
-            <div class="h3" style="margin-bottom: var(--space-4);">🌐 Account (Optional)</div>
+            <div class="h3" style="margin-bottom: var(--space-4);">🌐 Account</div>
 
             <div class="form-group">
-                <label class="form-label" for="account">Zendesk Subdomain</label>
+                <label class="form-label" for="account">Zendesk Subdomain <span class="form-hint">(required for AI Agent locale)</span></label>
                 <input class="form-field" type="text" id="account" placeholder="e.g. mycompany.zendesk.com">
+                <div class="form-field-help">Used to sync locale to the Sunshine Conversations user profile so the AI Agent responds in the correct language.</div>
             </div>
 
             <button type="submit" id="saveBtn" class="btn btn-primary btn-block btn-lg">Save & Launch</button>

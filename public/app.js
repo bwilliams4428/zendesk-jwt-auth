@@ -189,6 +189,7 @@ function applyLocaleFromSelect() {
             zE('messenger:set', 'locale', code);
             zE('messenger:set', 'conversationMetadata', { locale: code });
             log('✓ Locale applied: ' + code, 'success');
+            if (typeof syncLocaleToSunshine === 'function') syncLocaleToSunshine(code);
             var status = document.getElementById('localeStatus');
             if (status) status.textContent = 'Applied: ' + code;
         } catch (e) {
@@ -199,6 +200,65 @@ function applyLocaleFromSelect() {
         var status = document.getElementById('localeStatus');
         if (status) status.textContent = 'Saved: ' + code + ' (will apply when widget loads)';
     }
+
+    // Also sync locale to Sunshine Conversations user profile
+    // so the AI Agent reads the correct locale
+    syncLocaleToSunshine(code);
+}
+
+/**
+ * syncLocaleToSunshine — Update the Sunshine Conversations user profile locale
+ *
+ * The Zendesk AI Agent reads locale from the Sunshine user profile object.
+ * This calls PATCH /api/user/locale to update the user's profile.locale,
+ * which the AI Agent then uses for its response language.
+ *
+ * Uses the same Key ID and Secret from the setup page config —
+ * the Conversations API Key ID and Secret Key are used as Basic Auth.
+ */
+function syncLocaleToSunshine(locale) {
+    var userData = getUserData();
+    if (!userData || !userData.id) {
+        log('Cannot sync locale to Sunshine: no user logged in', 'info');
+        return;
+    }
+
+    var config = getConfig();
+    if (!config || !config.kid || !config.jwtSecret) {
+        log('Cannot sync locale to Sunshine: missing Key ID or Secret in config', 'error');
+        return;
+    }
+    if (!config.account) {
+        log('Cannot sync locale to Sunshine: missing Zendesk subdomain in config', 'error');
+        return;
+    }
+
+    var body = {
+        userId: userData.id,
+        locale: locale,
+        kid: config.kid,
+        jwtSecret: config.jwtSecret,
+        account: config.account,
+    };
+
+    log('Syncing locale to Sunshine profile for user ' + userData.id + '...', 'info');
+
+    fetch(API_BASE_URL + '/api/user/locale', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    })
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) {
+        if (data.status === 'success') {
+            log('✓ Sunshine user locale updated: ' + data.locale, 'success');
+        } else {
+            log('✗ Sunshine locale sync failed: ' + (data.message || JSON.stringify(data)), 'error');
+        }
+    })
+    .catch(function(err) {
+        log('✗ Sunshine locale sync error: ' + err.message, 'error');
+    });
 }
 
 function applySavedLocale() {
@@ -210,6 +270,7 @@ function applySavedLocale() {
             zE('messenger:set', 'locale', saved);
             zE('messenger:set', 'conversationMetadata', { locale: saved });
             log('✓ Auto-applied saved locale: ' + saved, 'success');
+            if (typeof syncLocaleToSunshine === 'function') syncLocaleToSunshine(saved);
             return true;
         } catch (e) {
             log('Locale auto-apply error: ' + e.message, 'error');

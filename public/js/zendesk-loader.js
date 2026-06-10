@@ -31,6 +31,11 @@
           zE('messenger:set', 'locale', savedLocale);
           zE('messenger:set', 'conversationMetadata', { locale: savedLocale });
           console.log('[zendesk-loader] Auto-applied locale: ' + savedLocale);
+          // Sync locale to Sunshine user profile (AI Agent reads profile.locale)
+          if (typeof window.syncLocaleToSunshine === 'function') {
+            // syncLocaleToSunshine is defined below — call after IIFE completes
+            setTimeout(function() { window.syncLocaleToSunshine(savedLocale); }, 500);
+          }
         } catch (e) {
           console.warn('[zendesk-loader] Locale auto-apply failed: ' + e.message);
         }
@@ -178,4 +183,66 @@
     };
     document.head.appendChild(script);
   }
+
+  // ─── Sunshine Conversations Locale Sync ──────────────────────
+
+  /**
+   * syncLocaleToSunshine — Update the Sunshine Conversations user profile locale.
+   *
+   * The Zendesk AI Agent reads locale from the Sunshine user profile object.
+   * This calls PATCH /api/user/locale to update profile.locale, which the
+   * AI Agent then uses for its response language.
+   *
+   * Uses the same Key ID (kid) and Secret (jwtSecret) from the setup page
+   * config, plus the Zendesk subdomain (account).
+   */
+  window.syncLocaleToSunshine = function (locale) {
+    var userData = localStorage.getItem('userData');
+    if (!userData) {
+      console.log('[zendesk-loader] Cannot sync locale to Sunshine: no user logged in');
+      return;
+    }
+    var user = JSON.parse(userData);
+    if (!user || !user.id) {
+      console.log('[zendesk-loader] Cannot sync locale to Sunshine: no user ID');
+      return;
+    }
+
+    var config = getConfig();
+    if (!config || !config.kid || !config.jwtSecret) {
+      console.warn('[zendesk-loader] Cannot sync locale to Sunshine: missing Key ID or Secret in config');
+      return;
+    }
+    if (!config.account) {
+      console.warn('[zendesk-loader] Cannot sync locale to Sunshine: missing Zendesk subdomain in config');
+      return;
+    }
+
+    var body = {
+      userId: user.id,
+      locale: locale,
+      kid: config.kid,
+      jwtSecret: config.jwtSecret,
+      account: config.account,
+    };
+
+    console.log('[zendesk-loader] Syncing locale to Sunshine profile for user ' + user.id + '...');
+
+    fetch(window.location.origin + '/api/user/locale', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    .then(function (resp) { return resp.json(); })
+    .then(function (data) {
+      if (data.status === 'success') {
+        console.log('[zendesk-loader] ✓ Sunshine user locale updated: ' + data.locale);
+      } else {
+        console.warn('[zendesk-loader] ✗ Sunshine locale sync failed: ' + (data.message || JSON.stringify(data)));
+      }
+    })
+    .catch(function (err) {
+      console.warn('[zendesk-loader] ✗ Sunshine locale sync error: ' + err.message);
+    });
+  };
 })();

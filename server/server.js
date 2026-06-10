@@ -232,6 +232,100 @@ app.get('/api/locales', async (req, res) => {
   }
 });
 
+// ─── Sunshine Conversations User Locale ──────────────────────
+
+/**
+ * PATCH /api/user/locale — Update the Sunshine Conversations user's locale
+ *
+ * The Zendesk AI Agent reads locale from the Sunshine user profile object,
+ * not from the widget locale setting. This endpoint calls the Sunshine API
+ * PATCH /v2/apps/{appId}/users/{userId} with { profile: { locale } }
+ * to set the user's locale, which the AI Agent then uses for responses.
+ *
+ * Credentials come from the browser's sessionStorage config (same ones
+ * used for JWT auth — the Conversations API Key ID and Secret Key).
+ *
+ * Body: { userId, locale, kid, jwtSecret, account }
+ */
+app.patch('/api/user/locale', async (req, res) => {
+  const { userId, locale, kid, jwtSecret, account } = req.body;
+
+  if (!userId || !locale) {
+    return res.status(400).json({ status: 'error', message: 'userId and locale are required' });
+  }
+
+  // Resolve credentials: request body first, then env vars
+  const apiKey = kid || process.env.ZENDESK_KID || '';
+  const apiSecret = jwtSecret || process.env.ZENDESK_JWT_SECRET || '';
+  const appId = kid || process.env.ZENDESK_KID || '';
+  const subdomain = account || process.env.ZENDESK_ACCOUNT || '';
+
+  if (!apiKey || !apiSecret) {
+    return res.status(500).json({
+      status: 'error',
+      message: 'Sunshine API credentials not configured. Provide kid and jwtSecret, or set ZENDESK_KID and ZENDESK_JWT_SECRET env vars.',
+    });
+  }
+  if (!subdomain) {
+    return res.status(500).json({ status: 'error', message: 'Zendesk subdomain not configured. Provide account, or set ZENDESK_ACCOUNT env var.' });
+  }
+
+  // Build the API URL — Zendesk customers use {subdomain}.zendesk.com/sc/v2
+  const apiBase = subdomain.includes('.') ? `https://${subdomain}/sc/v2` : `https://${subdomain}.zendesk.com/sc/v2`;
+  const url = `${apiBase}/apps/${encodeURIComponent(appId)}/users/${encodeURIComponent(userId)}`;
+
+  const payload = JSON.stringify({ profile: { locale: locale } });
+  const credentials = Buffer.from(`${apiKey}:${apiSecret}`).toString('base64');
+
+  try {
+    const https = require('https');
+
+    const apiRes = await new Promise((resolve, reject) => {
+      const req = https.request(url, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Basic ${credentials}`,
+          'Accept': 'application/json',
+        },
+      }, (apiRes) => {
+        let data = '';
+        apiRes.on('data', (chunk) => { data += chunk; });
+        apiRes.on('end', () => {
+          resolve({ statusCode: apiRes.statusCode, body: data });
+        });
+      });
+      req.on('error', reject);
+      req.write(payload);
+      req.end();
+    });
+
+    let parsed;
+    try {
+      parsed = JSON.parse(apiRes.body);
+    } catch (e) {
+      parsed = apiRes.body;
+    }
+
+    if (apiRes.statusCode >= 200 && apiRes.statusCode < 300) {
+      res.json({
+        status: 'success',
+        locale: locale,
+        userId: userId,
+        profile: parsed.user?.profile || parsed,
+      });
+    } else {
+      res.status(apiRes.statusCode).json({
+        status: 'error',
+        message: `Sunshine API error (${apiRes.statusCode})`,
+        detail: parsed,
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
 // ─── Page Routes ──────────────────────────────────────────────
 
 app.get('/', (req, res) => {
