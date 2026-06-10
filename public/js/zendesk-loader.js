@@ -76,6 +76,66 @@
       });
   }
 
+  // ─── Widget Teardown ──────────────────────────────────────
+
+  /**
+   * destroyZendeskWidget() — Fully remove the messaging widget.
+   * 1. Calls resetWidget to clear all user data, conversations, and connections
+   * 2. Hides the widget
+   * 3. Removes the Zendesk script tag and all Zendesk iframes/elements
+   * 4. Deletes the global zE function
+   * 5. Resets the ready state so the widget can be re-injected later
+   */
+  window.destroyZendeskWidget = function (callback) {
+    console.log('[zendesk-loader] Destroying widget...');
+
+    var cleanup = function () {
+      // Hide widget UI
+      try { zE('messenger', 'hide'); } catch (e) { /* ignore */ }
+
+      // Remove Zendesk script tag
+      var script = document.getElementById('ze-snippet');
+      if (script) script.remove();
+
+      // Remove all Zendesk iframes and injected DOM elements
+      var zendeskElements = document.querySelectorAll(
+        '[id^="zendesk-"], [class*="zendesk-"], [id*="WebWidget"], [class*="zE-"], ' +
+        'iframe[src*="zendesk"], iframe[src*="zdassets"], iframe[src*="static.zdassets"]'
+      );
+      zendeskElements.forEach(function (el) { el.remove(); });
+
+      // Remove stylesheet links injected by Zendesk
+      var zendeskStyles = document.querySelectorAll('link[href*="zdassets"], link[href*="zendesk"]');
+      zendeskStyles.forEach(function (el) { el.remove(); });
+
+      // Delete global zE so the widget is fully gone
+      delete window.zE;
+
+      // Reset ready state so widget can be re-initialized later
+      window._zendeskReady = false;
+      window._zendeskReadyCallbacks = [];
+
+      console.log('[zendesk-loader] Widget destroyed and removed from DOM');
+      if (typeof callback === 'function') callback();
+    };
+
+    // Step 1: Reset widget state (clears conversations, user data, connections)
+    if (typeof zE === 'function') {
+      try {
+        zE('messenger', 'resetWidget', function () {
+          console.log('[zendesk-loader] resetWidget completed');
+          cleanup();
+        });
+      } catch (e) {
+        console.warn('[zendesk-loader] resetWidget failed, falling back to cleanup:', e.message);
+        cleanup();
+      }
+    } else {
+      console.log('[zendesk-loader] zE not available, skipping resetWidget');
+      cleanup();
+    }
+  };
+
   function injectWidget(key) {
     console.log('[zendesk-loader] Loading widget for key: ' + key.slice(0, 8) + '...');
     var script = document.createElement('script');

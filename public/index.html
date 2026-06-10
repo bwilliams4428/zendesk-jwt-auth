@@ -275,9 +275,10 @@
             sessionStorage.removeItem(STORAGE_KEY);
             log('sessionStorage credentials cleared');
 
-            // Clear localStorage user data
+            // Clear localStorage user data + locale
             localStorage.removeItem('userData');
-            log('localStorage user data cleared');
+            localStorage.removeItem(LOCALE_KEY);
+            log('localStorage user data and locale cleared');
 
             // Reset in-memory state
             currentToken = null;
@@ -286,13 +287,26 @@
             tokenCard.style.display = 'none';
             createUserStatus.innerHTML = '';
 
+            // Clear locale dropdown
+            var localeSelect = document.getElementById('localeSelect');
+            if (localeSelect) localeSelect.selectedIndex = 0;
+            var localeStatus = document.getElementById('localeStatus');
+            if (localeStatus) localeStatus.textContent = '';
+
             // Clear form fields
             clearForm();
 
-            // Re-check config (will show warning since credentials are gone)
-            checkConfig();
+            // Destroy the Zendesk widget (reset state, hide, remove from DOM)
+            if (typeof destroyZendeskWidget === 'function') {
+                destroyZendeskWidget(function () {
+                    log('✓ Zendesk widget destroyed and removed', 'success');
+                    checkConfig();
+                });
+            } else {
+                checkConfig();
+            }
 
-            log('✓ All session data and credentials erased', 'success');
+            log('✓ All session data, credentials, and widget erased', 'success');
         }
 
         // ─── Locale Management ───────────────────────────────────

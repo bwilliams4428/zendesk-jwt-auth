@@ -106,6 +106,7 @@
         <a href="/" class="text-accent" style="display:block; text-align:center; margin-top: var(--space-4);">Skip setup — use environment variables instead</a>
     </div>
 
+    <script src="/js/zendesk-loader.js"></script>
     <script>
         var STORAGE_KEY = 'zendesk_config';
 
@@ -177,12 +178,22 @@
 
         function handleClear() {
             clearConfig();
+
+            // Also clear locale and user data
+            localStorage.removeItem('zendeskLocale');
+            localStorage.removeItem('userData');
+
+            // Destroy the Zendesk widget (reset state, hide, remove from DOM)
+            if (typeof destroyZendeskWidget === 'function') {
+                destroyZendeskWidget();
+            }
+
             document.getElementById('widgetKey').value = '';
             document.getElementById('kid').value = '';
             document.getElementById('jwtSecret').value = '';
             document.getElementById('account').value = '';
             document.getElementById('jwtSecret').placeholder = 'Paste your secret key here';
-            showStatus('🗑️ All credentials erased from browser sessionStorage.', 'info');
+            showStatus('🗑️ All credentials, user data, and widget erased. Locale reset.', 'info');
         }
 
         document.getElementById('setupForm').addEventListener('submit', handleSetup);

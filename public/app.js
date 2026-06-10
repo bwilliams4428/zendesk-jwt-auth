@@ -306,13 +306,23 @@ async function handleLogin(event) {
 async function handleLogout() {
     log('Logging out...');
 
-    if (typeof zE === 'function') {
-        try { zE('messenger', 'logoutUser'); log('Widget logout successful'); }
-        catch (error) { log('Widget logout error: ' + error.message, 'error'); }
+    // Destroy the widget (reset state, clear conversations, remove from DOM)
+    if (typeof destroyZendeskWidget === 'function') {
+        destroyZendeskWidget(function () {
+            log('Widget destroyed on logout', 'success');
+            clearUserData();
+            localStorage.removeItem('zendeskLocale');
+            window.location.href = 'login.html';
+        });
+    } else {
+        // Fallback if loader script not loaded
+        if (typeof zE === 'function') {
+            try { zE('messenger', 'logoutUser'); } catch (e) { /* ignore */ }
+        }
+        clearUserData();
+        localStorage.removeItem('zendeskLocale');
+        window.location.href = 'login.html';
     }
-
-    clearUserData();
-    window.location.href = 'login.html';
 }
 
 // ─── Initialization ────────────────────────────────────────────
