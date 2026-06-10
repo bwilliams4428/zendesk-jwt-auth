@@ -202,6 +202,36 @@ app.post('/api/auth/verify', (req, res) => {
   }
 });
 
+// ─── Locales Endpoint ────────────────────────────────────────
+
+/**
+ * GET /api/locales — proxy Zendesk public locales API
+ * Returns all locales supported by the Zendesk messaging widget.
+ */
+app.get('/api/locales', async (req, res) => {
+  try {
+    const https = require('https');
+    const url = 'https://support.zendesk.com/api/v2/locales/public.json';
+
+    https.get(url, (apiRes) => {
+      let data = '';
+      apiRes.on('data', (chunk) => { data += chunk; });
+      apiRes.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          res.json(parsed);
+        } catch (e) {
+          res.status(500).json({ status: 'error', message: 'Failed to parse locales response' });
+        }
+      });
+    }).on('error', (err) => {
+      res.status(502).json({ status: 'error', message: 'Failed to fetch locales: ' + err.message });
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
 // ─── Page Routes ──────────────────────────────────────────────
 
 app.get('/', (req, res) => {

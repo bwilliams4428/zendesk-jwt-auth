@@ -12,6 +12,8 @@
         <div class="navbar-links">
             <a href="/setup.html">⚙️ Configuration</a>
             <a href="/">🏠 Home</a>
+            <a href="/messaging.html">💬 Messaging</a>
+            <a href="/locales.html">🌐 Locales</a>
         </div>
     </nav>
 
@@ -22,6 +24,23 @@
 
         <div id="configWarning" class="callout callout-warning" style="display:none;">
             ⚠️ No Zendesk credentials found. <a href="/setup.html">Enter your credentials</a> to get started.
+        </div>
+
+        <!-- Widget Locale Selector -->
+        <div class="card animate-in">
+            <h2>🌐 Widget Locale</h2>
+            <p>Set the language for the Zendesk messaging widget. Defaults to your browser language.</p>
+            <div class="form-group">
+                <label class="form-label" for="localeSelect">Locale</label>
+                <select class="form-field" id="localeSelect" style="max-width: 300px;">
+                    <option value="">Loading locales...</option>
+                </select>
+            </div>
+            <div style="margin-top: var(--space-3);">
+                <button class="btn btn-primary" onclick="applyLocaleFromSelect()">Apply Locale</button>
+                <a href="/locales.html" class="btn btn-secondary" style="display: inline-block; text-decoration: none; margin-left: var(--space-2);">View All Locales</a>
+            </div>
+            <div id="localeStatus" style="margin-top: var(--space-2); font-size: 0.85rem; color: hsl(var(--muted-foreground));"></div>
         </div>
 
         <h1>🔐 Zendesk JWT Authentication Debugger</h1>
@@ -241,10 +260,93 @@
             }, 500);
         }
 
+        // ─── Locale Management ───────────────────────────────────
+        var LOCALE_KEY = 'zendeskLocale';
+
+        function getCurrentLocale() {
+            return localStorage.getItem(LOCALE_KEY) || navigator.language || 'en-US';
+        }
+
+        function loadLocalesIntoSelect() {
+            var select = document.getElementById('localeSelect');
+            if (!select) return;
+            var current = getCurrentLocale();
+
+            fetch(API_URL + '/api/locales')
+                .then(function(res) { return res.json(); })
+                .then(function(data) {
+                    var locales = data.locales || [];
+                    select.innerHTML = '<option value="">— Select locale —</option>';
+
+                    var common = ['en-US', 'en-GB', 'fr-FR', 'de-DE', 'es-ES', 'ja-JP', 'pt-BR', 'zh-CN', 'zh-TW', 'ko-KR', 'it-IT', 'nl-NL', 'ru-RU', 'ar'];
+                    var sorted = locales.slice().sort(function(a, b) {
+                        var ai = common.indexOf(a.locale);
+                        var bi = common.indexOf(b.locale);
+                        if (ai !== -1 && bi !== -1) return ai - bi;
+                        if (ai !== -1) return -1;
+                        if (bi !== -1) return 1;
+                        return a.name.localeCompare(b.name);
+                    });
+
+                    sorted.forEach(function(locale) {
+                        var opt = document.createElement('option');
+                        opt.value = locale.locale;
+                        opt.textContent = locale.name + ' (' + locale.locale + ')';
+                        if (locale.locale === current) opt.selected = true;
+                        select.appendChild(opt);
+                    });
+
+                    var status = document.getElementById('localeStatus');
+                    if (status) status.textContent = 'Current: ' + current + ' · ' + locales.length + ' locales available';
+                })
+                .catch(function(err) {
+                    select.innerHTML = '<option value="">Failed to load locales</option>';
+                    log('Locale fetch error: ' + err.message, 'error');
+                });
+        }
+
+        function applyLocaleFromSelect() {
+            var select = document.getElementById('localeSelect');
+            var code = select ? select.value : '';
+            if (!code) { log('Select a locale first', 'error'); return; }
+
+            localStorage.setItem(LOCALE_KEY, code);
+
+            if (typeof zE === 'function') {
+                try {
+                    zE('messenger:set', 'locale', code);
+                    log('✓ Locale applied: ' + code, 'success');
+                    var status = document.getElementById('localeStatus');
+                    if (status) status.textContent = 'Applied: ' + code;
+                } catch (e) {
+                    log('✗ Locale error: ' + e.message, 'error');
+                }
+            } else {
+                log('Widget not loaded — locale saved for next load', 'info');
+                var status = document.getElementById('localeStatus');
+                if (status) status.textContent = 'Saved: ' + code + ' (will apply when widget loads)';
+            }
+        }
+
+        // Load locale dropdown
+        loadLocalesIntoSelect();
+
         checkConfig();
 
         onZendeskWidgetReady(function () {
             log('✓ Zendesk widget loaded', 'success');
+
+            // Auto-apply saved locale
+            var saved = getCurrentLocale();
+            if (saved) {
+                try {
+                    zE('messenger:set', 'locale', saved);
+                    log('✓ Auto-applied locale: ' + saved, 'success');
+                } catch (e) {
+                    log('Locale auto-apply error: ' + e.message, 'error');
+                }
+            }
+
             setTimeout(generateToken, 500);
         });
     </script>

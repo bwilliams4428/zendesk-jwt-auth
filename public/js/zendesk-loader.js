@@ -20,6 +20,19 @@
       window._zendeskReadyCallbacks = [];
     }
     window._zendeskReady = true;
+
+    // Auto-apply saved locale before firing page callbacks
+    var LOCALE_KEY = 'zendeskLocale';
+    var savedLocale = localStorage.getItem(LOCALE_KEY) || navigator.language;
+    if (savedLocale && typeof zE === 'function') {
+      try {
+        zE('messenger:set', 'locale', savedLocale);
+        console.log('[zendesk-loader] Auto-applied locale: ' + savedLocale);
+      } catch (e) {
+        console.warn('[zendesk-loader] Locale auto-apply failed: ' + e.message);
+      }
+    }
+
     window._zendeskReadyCallbacks.forEach(function (fn) { fn(); });
     window._zendeskReadyCallbacks = [];
   }

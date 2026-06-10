@@ -130,6 +130,91 @@ async function fetchFreshJwtToken(userData) {
     }
 }
 
+// ─── Locale Management ──────────────────────────────────────
+
+var LOCALE_KEY = 'zendeskLocale';
+
+function getCurrentLocale() {
+    return localStorage.getItem(LOCALE_KEY) || navigator.language || 'en-US';
+}
+
+function loadLocalesIntoSelect() {
+    var select = document.getElementById('localeSelect');
+    if (!select) return;
+    var current = getCurrentLocale();
+
+    fetch(API_BASE_URL + '/api/locales')
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            var locales = data.locales || [];
+            select.innerHTML = '<option value="">— Select locale —</option>';
+
+            var common = ['en-US', 'en-GB', 'fr-FR', 'de-DE', 'es-ES', 'ja-JP', 'pt-BR', 'zh-CN', 'zh-TW', 'ko-KR', 'it-IT', 'nl-NL', 'ru-RU', 'ar'];
+            var sorted = locales.slice().sort(function(a, b) {
+                var ai = common.indexOf(a.locale);
+                var bi = common.indexOf(b.locale);
+                if (ai !== -1 && bi !== -1) return ai - bi;
+                if (ai !== -1) return -1;
+                if (bi !== -1) return 1;
+                return a.name.localeCompare(b.name);
+            });
+
+            sorted.forEach(function(locale) {
+                var opt = document.createElement('option');
+                opt.value = locale.locale;
+                opt.textContent = locale.name + ' (' + locale.locale + ')';
+                if (locale.locale === current) opt.selected = true;
+                select.appendChild(opt);
+            });
+
+            var status = document.getElementById('localeStatus');
+            if (status) status.textContent = 'Current: ' + current + ' · ' + locales.length + ' locales available';
+        })
+        .catch(function(err) {
+            select.innerHTML = '<option value="">Failed to load locales</option>';
+            log('Locale fetch error: ' + err.message, 'error');
+        });
+}
+
+function applyLocaleFromSelect() {
+    var select = document.getElementById('localeSelect');
+    var code = select ? select.value : '';
+    if (!code) { log('Select a locale first', 'error'); return; }
+
+    localStorage.setItem(LOCALE_KEY, code);
+
+    if (typeof zE === 'function') {
+        try {
+            zE('messenger:set', 'locale', code);
+            log('✓ Locale applied: ' + code, 'success');
+            var status = document.getElementById('localeStatus');
+            if (status) status.textContent = 'Applied: ' + code;
+        } catch (e) {
+            log('✗ Locale error: ' + e.message, 'error');
+        }
+    } else {
+        log('Widget not loaded — locale saved for next load', 'info');
+        var status = document.getElementById('localeStatus');
+        if (status) status.textContent = 'Saved: ' + code + ' (will apply when widget loads)';
+    }
+}
+
+function applySavedLocale() {
+    var saved = getCurrentLocale();
+    if (!saved) return false;
+    if (typeof zE === 'function') {
+        try {
+            zE('messenger:set', 'locale', saved);
+            log('✓ Auto-applied saved locale: ' + saved, 'success');
+            return true;
+        } catch (e) {
+            log('Locale auto-apply error: ' + e.message, 'error');
+            return false;
+        }
+    }
+    return false;
+}
+
 // ─── Zendesk Authentication ────────────────────────────────────
 
 async function setupZendeskAuthentication() {
@@ -328,5 +413,9 @@ window.zendeskAuthDebug = {
     getConfig: getConfig,
     fetchFreshJwtToken: fetchFreshJwtToken,
     setupZendeskAuthentication: setupZendeskAuthentication,
+    getCurrentLocale: getCurrentLocale,
+    loadLocalesIntoSelect: loadLocalesIntoSelect,
+    applyLocaleFromSelect: applyLocaleFromSelect,
+    applySavedLocale: applySavedLocale,
     log: log
 };
