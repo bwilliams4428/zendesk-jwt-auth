@@ -292,6 +292,7 @@
             if (!code) { log('Select a locale first', 'error'); return; }
 
             localStorage.setItem(LOCALE_KEY, code);
+            document.documentElement.lang = code;
 
             if (typeof zE === 'function') {
                 try {
@@ -324,6 +325,7 @@
             // Auto-apply saved locale
             var saved = getCurrentLocale();
             if (saved) {
+                document.documentElement.lang = saved;
                 try {
                     zE('messenger:set', 'locale', saved);
                     log('✓ Auto-applied locale: ' + saved, 'success');

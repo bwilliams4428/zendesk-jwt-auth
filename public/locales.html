@@ -179,6 +179,7 @@
 
         function applyLocale(code, name) {
             localStorage.setItem(LOCALE_KEY, code);
+            document.documentElement.lang = code;
             updateCurrentDisplay();
 
             if (typeof zE === 'function') {

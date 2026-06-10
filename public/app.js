@@ -182,6 +182,7 @@ function applyLocaleFromSelect() {
     if (!code) { log('Select a locale first', 'error'); return; }
 
     localStorage.setItem(LOCALE_KEY, code);
+    document.documentElement.lang = code;
 
     if (typeof zE === 'function') {
         try {
@@ -202,6 +203,7 @@ function applyLocaleFromSelect() {
 function applySavedLocale() {
     var saved = getCurrentLocale();
     if (!saved) return false;
+    document.documentElement.lang = saved;
     if (typeof zE === 'function') {
         try {
             zE('messenger:set', 'locale', saved);
@@ -312,6 +314,7 @@ async function handleLogout() {
             log('Widget destroyed on logout', 'success');
             clearUserData();
             localStorage.removeItem('zendeskLocale');
+            document.documentElement.lang = navigator.language || 'en';
             window.location.href = 'login.html';
         });
     } else {
@@ -321,6 +324,7 @@ async function handleLogout() {
         }
         clearUserData();
         localStorage.removeItem('zendeskLocale');
+        document.documentElement.lang = navigator.language || 'en';
         window.location.href = 'login.html';
     }
 }

@@ -293,6 +293,9 @@
             var localeStatus = document.getElementById('localeStatus');
             if (localeStatus) localeStatus.textContent = '';
 
+            // Reset page language to browser default
+            document.documentElement.lang = navigator.language || 'en';
+
             // Clear form fields
             clearForm();
 
@@ -361,6 +364,7 @@
             if (!code) { log('Select a locale first', 'error'); return; }
 
             localStorage.setItem(LOCALE_KEY, code);
+            document.documentElement.lang = code;
 
             if (typeof zE === 'function') {
                 try {
@@ -381,12 +385,15 @@
         // Auto-apply saved locale when widget becomes ready
         onZendeskWidgetReady(function() {
             var saved = getCurrentLocale();
-            if (saved && saved !== navigator.language) {
-                try {
-                    zE('messenger:set', 'locale', saved);
-                    log('✓ Auto-applied saved locale: ' + saved, 'success');
-                } catch (e) {
-                    log('Locale auto-apply error: ' + e.message, 'error');
+            if (saved) {
+                document.documentElement.lang = saved;
+                if (saved !== navigator.language) {
+                    try {
+                        zE('messenger:set', 'locale', saved);
+                        log('✓ Auto-applied saved locale: ' + saved, 'success');
+                    } catch (e) {
+                        log('Locale auto-apply error: ' + e.message, 'error');
+                    }
                 }
             }
         });

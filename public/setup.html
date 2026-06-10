@@ -183,6 +183,9 @@
             localStorage.removeItem('zendeskLocale');
             localStorage.removeItem('userData');
 
+            // Reset page language to browser default
+            document.documentElement.lang = navigator.language || 'en';
+
             // Destroy the Zendesk widget (reset state, hide, remove from DOM)
             if (typeof destroyZendeskWidget === 'function') {
                 destroyZendeskWidget();
