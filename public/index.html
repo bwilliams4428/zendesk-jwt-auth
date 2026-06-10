@@ -43,6 +43,19 @@
             <div id="localeStatus" style="margin-top: var(--space-2); font-size: 0.85rem; color: hsl(var(--muted-foreground));"></div>
         </div>
 
+        <!-- Headless Browser Launcher -->
+        <div class="card animate-in">
+            <h2>🚀 Locale-Controlled Browser</h2>
+            <p>Launch a Chrome browser with the selected locale as its browser language.
+               This ensures the Zendesk AI Agent receives the correct <code>navigator.language</code> for its responses.</p>
+            <p style="font-size: 0.85rem; color: hsl(var(--muted-foreground)); margin-bottom: var(--space-3);">
+                The AI Agent reads the browser's language, not just the widget locale. This button opens a separate
+                Chrome window whose language matches your selection, so the bot responds in the right language.
+            </p>
+            <div id="browserStatus" style="margin-bottom: var(--space-3); font-size: 0.85rem;"></div>
+            <button class="btn btn-primary" id="launchBrowserBtn" onclick="launchLocaleBrowser()" disabled>Checking...</button>
+        </div>
+
         <div class="card animate-in">
             <h2>🆕 Create New Authenticated User</h2>
             <p>Enter user details to generate a JWT token and authenticate with Zendesk.</p>
@@ -402,6 +415,73 @@
 
         // Load locale dropdown
         loadLocalesIntoSelect();
+
+        // ─── Headless Browser Launcher ─────────────────────────
+        var launchBrowserBtn = document.getElementById('launchBrowserBtn');
+
+        async function launchLocaleBrowser() {
+            var locale = getCurrentLocale();
+            if (!locale) {
+                var select = document.getElementById('localeSelect');
+                locale = select ? select.value : '';
+            }
+            if (!locale) {
+                log('Select a locale first', 'error');
+                return;
+            }
+
+            launchBrowserBtn.disabled = true;
+            launchBrowserBtn.textContent = 'Launching...';
+            var statusEl = document.getElementById('browserStatus');
+            statusEl.textContent = 'Launching Chrome with locale ' + locale + '...';
+            statusEl.style.color = '';
+
+            try {
+                var resp = await fetch('/api/browser/launch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ locale: locale }),
+                });
+                var data = await resp.json();
+
+                if (data.status === 'success') {
+                    log('✓ Browser launched: locale=' + data.locale + ' url=' + data.url, 'success');
+                    statusEl.textContent = '✓ ' + data.message + ' (PID: ' + data.pid + ')';
+                    statusEl.style.color = 'hsl(var(--success))';
+                    launchBrowserBtn.textContent = 'Launched ✓';
+                } else {
+                    log('✗ Browser launch failed: ' + data.message, 'error');
+                    statusEl.textContent = '✗ ' + data.message;
+                    statusEl.style.color = 'hsl(var(--destructive))';
+                }
+            } catch (err) {
+                log('✗ Browser launch error: ' + err.message, 'error');
+                statusEl.textContent = '✗ ' + err.message;
+                statusEl.style.color = 'hsl(var(--destructive))';
+            } finally {
+                setTimeout(function () {
+                    launchBrowserBtn.disabled = false;
+                    launchBrowserBtn.textContent = '🚀 Launch Browser';
+                }, 3000);
+            }
+        }
+
+        // Check browser availability on load
+        fetch('/api/browser/status').then(function(r) { return r.json(); }).then(function(data) {
+            if (data.available) {
+                launchBrowserBtn.disabled = false;
+                launchBrowserBtn.textContent = '🚀 Launch Browser';
+            } else {
+                launchBrowserBtn.disabled = true;
+                launchBrowserBtn.textContent = 'Browser not available';
+                document.getElementById('browserStatus').textContent =
+                    'Puppeteer or Chrome not found on the server.';
+                document.getElementById('browserStatus').style.color = 'hsl(var(--muted-foreground))';
+            }
+        }).catch(function() {
+            launchBrowserBtn.disabled = true;
+            launchBrowserBtn.textContent = 'Unavailable';
+        });
 
         // Event listeners
         createUserBtn.addEventListener('click', createAndAuthenticateUser);

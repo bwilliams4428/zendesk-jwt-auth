@@ -232,6 +232,115 @@ app.get('/api/locales', async (req, res) => {
   }
 });
 
+// ─── Headless Browser Endpoint ───────────────────────────────
+
+/**
+ * POST /api/browser/launch — Launch a headless Chrome browser with a specific locale
+ *
+ * This spawns a real Chrome window whose browser locale matches the selected locale.
+ * The Zendesk messaging widget reads navigator.language from the browser context,
+ * so setting Chrome's --lang flag controls the locale the AI Agent responds in.
+ *
+ * Body: { locale: "fr-FR" }
+ * Returns: { status: "success", pid: <number> } or { status: "error", message: "..." }
+ */
+app.post('/api/browser/launch', async (req, res) => {
+  const { locale } = req.body;
+  if (!locale) {
+    return res.status(400).json({ status: 'error', message: 'locale is required (e.g. "fr-FR")' });
+  }
+
+  try {
+    const puppeteer = require('puppeteer-core');
+
+    // Find Chrome on macOS
+    const fs = require('fs');
+    const chromePaths = [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    ];
+    let executablePath = null;
+    for (const p of chromePaths) {
+      if (fs.existsSync(p)) { executablePath = p; break; }
+    }
+    if (!executablePath) {
+      return res.status(500).json({ status: 'error', message: 'Chrome not found. Install Google Chrome.' });
+    }
+
+    // Parse locale into language-only for --lang (e.g. "fr-FR" → "fr")
+    const langOnly = locale.split('-')[0];
+
+    const appUrl = `http://localhost:${PORT}`;
+
+    const browser = await puppeteer.launch({
+      executablePath,
+      headless: false,  // Visible window so user can interact with the widget
+      args: [
+        `--lang=${langOnly}`,
+        `--accept-lang=${locale},${langOnly}`,
+        '--no-first-run',
+        '--no-default-browser-check',
+        `--window-size=1280,900`,
+      ],
+      defaultViewport: null,
+      ignoreDefaultArgs: ['--disable-extensions'],
+    });
+
+    const page = (await browser.pages())[0] || await browser.newPage();
+
+    // Override navigator.language so the widget gets the exact locale
+    await page.evaluateOnNewDocument((loc) => {
+      Object.defineProperty(navigator, 'language', { get: () => loc, configurable: true });
+      Object.defineProperty(navigator, 'languages', { get: () => [loc], configurable: true });
+    }, locale);
+
+    // Set extra headers so the Accept-Language sent with requests matches
+    await page.setExtraHTTPHeaders({ 'Accept-Language': `${locale},${langOnly};q=0.9,en;q=0.5` });
+
+    await page.goto(appUrl, { waitUntil: 'networkidle2' });
+
+    // Store PID for potential cleanup
+    const pid = browser.process()?.pid || null;
+
+    res.json({
+      status: 'success',
+      pid,
+      locale,
+      url: appUrl,
+      message: `Headless browser launched with locale ${locale}`,
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
+/**
+ * GET /api/browser/status — Check if Puppeteer/Chrome is available
+ */
+app.get('/api/browser/status', (req, res) => {
+  const fs = require('fs');
+  const chromePaths = [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  ];
+  let chromeFound = null;
+  for (const p of chromePaths) {
+    if (fs.existsSync(p)) { chromeFound = p; break; }
+  }
+
+  let puppeteerAvailable = false;
+  try {
+    require('puppeteer-core');
+    puppeteerAvailable = true;
+  } catch (e) { /* not installed */ }
+
+  res.json({
+    available: puppeteerAvailable && !!chromeFound,
+    chrome: chromeFound,
+    puppeteer: puppeteerAvailable,
+  });
+});
+
 // ─── Page Routes ──────────────────────────────────────────────
 
 app.get('/', (req, res) => {
