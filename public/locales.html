@@ -185,6 +185,7 @@
             if (typeof zE === 'function') {
                 try {
                     zE('messenger:set', 'locale', code);
+                    zE('messenger:set', 'conversationMetadata', { locale: code });
                     addLog('✓ Locale applied: ' + code + ' (' + name + ')', 'success');
                 } catch (e) {
                     addLog('✗ Failed to set locale: ' + e.message, 'error');

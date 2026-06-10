@@ -29,6 +29,7 @@
       if (typeof zE === 'function') {
         try {
           zE('messenger:set', 'locale', savedLocale);
+          zE('messenger:set', 'conversationMetadata', { locale: savedLocale });
           console.log('[zendesk-loader] Auto-applied locale: ' + savedLocale);
         } catch (e) {
           console.warn('[zendesk-loader] Locale auto-apply failed: ' + e.message);

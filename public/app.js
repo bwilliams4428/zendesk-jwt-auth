@@ -187,6 +187,7 @@ function applyLocaleFromSelect() {
     if (typeof zE === 'function') {
         try {
             zE('messenger:set', 'locale', code);
+            zE('messenger:set', 'conversationMetadata', { locale: code });
             log('✓ Locale applied: ' + code, 'success');
             var status = document.getElementById('localeStatus');
             if (status) status.textContent = 'Applied: ' + code;
@@ -207,6 +208,7 @@ function applySavedLocale() {
     if (typeof zE === 'function') {
         try {
             zE('messenger:set', 'locale', saved);
+            zE('messenger:set', 'conversationMetadata', { locale: saved });
             log('✓ Auto-applied saved locale: ' + saved, 'success');
             return true;
         } catch (e) {
