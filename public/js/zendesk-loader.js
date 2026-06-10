@@ -142,6 +142,19 @@
 
   function injectWidget(key) {
     console.log('[zendesk-loader] Loading widget for key: ' + key.slice(0, 8) + '...');
+
+    // ── Set locale BEFORE widget loads ──────────────────────────
+    // Zendesk docs: "This code should be placed immediately after
+    // the messaging Web Widget code snippet." The widget reads
+    // zESettings.webWidget.locale at init time, which is BEFORE
+    // any zE() calls can be made. This is the only reliable way
+    // to control the AI Agent's response language.
+    var savedLocale = localStorage.getItem('zendeskLocale') || navigator.language || 'en-US';
+    window.zESettings = window.zESettings || {};
+    window.zESettings.webWidget = window.zESettings.webWidget || {};
+    window.zESettings.webWidget.locale = savedLocale;
+    console.log('[zendesk-loader] Set zESettings.webWidget.locale = ' + savedLocale);
+
     var script = document.createElement('script');
     script.id = 'ze-snippet';
     script.src = 'https://static.zdassets.com/ekr/snippet.js?key=' + key;
