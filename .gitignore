@@ -1,9 +1,9 @@
 # Dependencies
 node_modules/
-package-lock.json
 
 # Environment variables
 .env
+config.json
 
 # Logs
 *.log
