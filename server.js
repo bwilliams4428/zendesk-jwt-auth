@@ -55,7 +55,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "https://static.zdassets.com"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://static.zdassets.com"],
+      scriptSrcAttr: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:"],
       connectSrc: ["'self'", "https://*.zendesk.com", "https://*.zdassets.com"],
