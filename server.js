@@ -153,8 +153,16 @@ function hasEnvConfig() {
 const API_KEY = process.env.API_KEY || null;
 
 function requireAuth(req, res, next) {
-  // Allow if request has a valid sessionId in the body/query
-  const sessionId = req.body?.sessionId || req.query?.sessionId;
+  // Allow if request has a valid sessionId in the body or query
+  let sessionId = req.body?.sessionId || req.query?.sessionId;
+
+  // Also extract session ID from URL path for /api/session/:id/... routes
+  // (req.params isn't populated yet in middleware, so parse from URL)
+  const pathMatch = req.originalUrl?.match(/^\/api\/session\/([a-f0-9]+)/);
+  if (!sessionId && pathMatch) {
+    sessionId = pathMatch[1];
+  }
+
   if (sessionId && getCredentials(sessionId)) {
     return next();
   }
