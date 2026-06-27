@@ -212,7 +212,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     <ul style="margin:4px 0 0 20px">
       <li><strong>Subdomain & Admin credentials</strong> — to create Zendesk end-user accounts</li>
       <li><strong>Sunco App ID, Key ID & Secret Key</strong> — to create Sunshine Conversations user profiles and sign JWT tokens</li>
-      <li><strong>Widget Key</strong> — to load the Zendesk messaging widget (optional for config, required for login)</li>
+      <li><strong>Widget Key</strong> — to load the Zendesk messaging widget</li>
     </ul>
     <br>
     Once configured, you'll create a Zendesk end-user account by providing a <strong>full name</strong> and <strong>email address</strong> — the <strong>external ID</strong> is automatically generated from the email. You'll then set a <strong>password</strong> for the account and log in to open an authenticated messaging session via JWT.
@@ -703,7 +703,7 @@ function saveConfig() {
     payload[map[fields[i]]] = el.value.trim();
   }
   for (var k in payload) {
-    if (k !== 'widgetKey' && !payload[k]) { showStatus('configStatus', 'error', 'All fields except Widget Key are required.'); return; }
+    if (!payload[k]) { showStatus('configStatus', 'error', 'All fields are required.'); return; }
   }
 
   _rawFetch('/api/session', {
@@ -1085,7 +1085,7 @@ function qlSaveConfig() {
     payload[map[fields[i]]] = el.value.trim();
   }
   for (var k in payload) {
-    if (k !== 'widgetKey' && !payload[k]) { showStatus('qlConfigStatus', 'error', 'All fields except Widget Key are required.'); return; }
+    if (!payload[k]) { showStatus('qlConfigStatus', 'error', 'All fields are required.'); return; }
   }
 
   showStatus('qlConfigStatus', 'info', 'Saving configuration…');
