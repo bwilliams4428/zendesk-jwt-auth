@@ -318,78 +318,65 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 <div class="page" id="pageQuicklogin">
   <div style="background:var(--primary-light);border:1px solid #b8dfe3;border-radius:var(--radius);padding:20px;margin-bottom:20px;font-size:13px;color:#034048;line-height:1.7">
     <strong style="font-size:14px;display:block;margin-bottom:6px">ℹ️ How User Login Works</strong>
-    User Login lets you authenticate as a Zendesk end-user into the messaging widget in one step — just email and password.
+    User Login lets you authenticate as a Zendesk end-user into the messaging widget. Enter your Zendesk configuration, then log in with a Zendesk user account.
     <br><br>
-    <strong>What happens when you click Login:</strong>
+    <strong>Steps:</strong>
     <ol style="margin:4px 0 0 20px;padding-left:16px">
-      <li>Your <strong>email</strong> is used to look up the Zendesk user account</li>
-      <li>A <strong>JWT token</strong> is generated server-side using credentials from environment variables</li>
-      <li>The <strong>messaging widget</strong> loads and authenticates you automatically</li>
-      <li>You can then <strong>chat as that user</strong> in the widget</li>
+      <li><strong>Save Configuration</strong> — Enter your Zendesk and Sunshine Conversations credentials</li>
+      <li><strong>Login</strong> — Provide a Zendesk user's email and password</li>
+      <li><strong>Chat</strong> — The messaging widget opens with an authenticated session</li>
     </ol>
-    <br>
-    <strong>First time?</strong> You need credentials configured to log in. Either save them on the <em>Configuration</em> page tab, or ask your administrator to set the Zendesk environment variables on the hosting platform.
   </div>
 
-  <!-- User Login config status — shown when no config is available.
-       Credentials can come from environment variables OR from the
-       Configuration page session. This card shows the current status. -->
-  <div id="qlConfig" class="card" style="display:none">
+  <!-- Step 1: Zendesk Configuration form — editable inputs, same fields as Configuration page -->
+  <div id="qlConfig" class="card">
     <div class="card-header">⚙️ Zendesk Configuration</div>
     <div class="card-body">
-      <div style="background:var(--warning-light);border:1px solid #e8cb8a;border-radius:var(--radius-sm);padding:12px 16px;font-size:13px;color:#6d4900;margin-bottom:16px">
-        <strong>⚠️ Configuration Required</strong><br>
-        Credentials can be provided in two ways:
-        <ul style="margin:8px 0 0 20px;font-size:12px">
-          <li><strong>Option 1:</strong> Save your credentials on the <em>Configuration</em> page tab (they'll be available here while your session is active)</li>
-          <li><strong>Option 2:</strong> Set <strong>environment variables</strong> on your hosting platform (Render → Environment):
-            <ul style="margin:4px 0 0 16px;font-size:12px;font-family:'SF Mono',SFMono-Regular,Consolas,monospace">
-              <li><code>ZENDESK_SUBDOMAIN</code></li>
-              <li><code>ZENDESK_ADMIN_EMAIL</code></li>
-              <li><code>ZENDESK_API_TOKEN</code> (Secret)</li>
-              <li><code>SUNCO_APP_ID</code></li>
-              <li><code>SUNCO_KEY_ID</code></li>
-              <li><code>SUNCO_SECRET</code> (Secret)</li>
-              <li><code>ZENDESK_WIDGET_KEY</code></li>
-            </ul>
-          </li>
-        </ul>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Subdomain</label><input class="form-input" id="qlSubdomain" placeholder="e.g. z3nbwilliams"></div>
+        <div class="form-group"><label class="form-label">Admin Email</label><input class="form-input" id="qlAdminEmail" placeholder="admin@company.com"></div>
       </div>
-      <div id="qlConfigFields" style="display:none">
-        <p style="font-size:13px;color:var(--success);font-weight:600;margin-bottom:8px">✓ Configuration detected <span id="qlConfigSource" style="font-weight:400;color:var(--text3)"></span></p>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div class="form-group"><label class="form-label">Subdomain</label><input class="form-input" id="qlSubdomain" readonly style="background:var(--surface2)"></div>
-          <div class="form-group"><label class="form-label">Admin Email</label><input class="form-input" id="qlAdminEmail" readonly style="background:var(--surface2)"></div>
-          <div class="form-group"><label class="form-label">App ID</label><input class="form-input" id="qlAppId" readonly style="background:var(--surface2)"></div>
-          <div class="form-group"><label class="form-label">Key ID</label><input class="form-input" id="qlKeyId" readonly style="background:var(--surface2)"></div>
-          <div class="form-group" style="grid-column:1/-1"><label class="form-label">Widget Key</label><input class="form-input" id="qlWidgetKey" readonly style="background:var(--surface2)"></div>
-        </div>
-        <div class="form-hint" style="margin-top:8px">Sensitive fields (API Token, Secret Key) are never exposed. Configuration is read-only — update via environment variables or the Configuration page.</div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">API Token</label><input class="form-input" id="qlApiToken" type="password" placeholder="Zendesk API token"></div>
+        <div class="form-group"><label class="form-label">Sunco App ID</label><input class="form-input" id="qlAppId" placeholder="e.g. 62225595c1fb3a00ef92bac9"></div>
       </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Sunco Key ID</label><input class="form-input" id="qlKeyId" placeholder="e.g. app_6a2e3b044862d1b9713a62a1"></div>
+        <div class="form-group"><label class="form-label">Sunco Secret Key</label><input class="form-input" id="qlSecret" type="password" placeholder="Secret Key (as shown in Admin Center)"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Widget Key</label>
+        <input class="form-input" id="qlWidgetKey" placeholder="e.g. 8b5a738b-fb7a-42c5-95a6-1cb26e82900a">
+        <div class="form-hint">Found in Admin Center → Channels → Messaging → Web Widget → Installation</div>
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-primary" id="btnQlSaveConfig" onclick="qlSaveConfig()">Save Configuration</button>
+      </div>
+      <div class="form-hint" style="margin-top:8px">Credentials are stored server-side only and never saved in the browser.</div>
       <div class="status-box" id="qlConfigStatus"></div>
     </div>
   </div>
 
-  <!-- Login form — shown after config is available (env vars or session).
-       Sends email + password to POST /api/quick-login, which looks up
-       the Zendesk user, generates a JWT, and returns auth data. -->
+  <!-- Step 2: Login form — shown after config is saved -->
   <div id="qlLogin" class="card" style="display:none">
     <div class="card-header">🔐 Login</div>
     <div class="card-body">
+      <div style="background:var(--success-light);border:1px solid #b2dfca;border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:#0a5c3a;margin-bottom:16px">
+        ✓ Configuration saved. Enter a Zendesk user account to authenticate.
+      </div>
       <div class="form-group"><label class="form-label">Username (Email)</label><input class="form-input" id="qlEmail" placeholder="user@company.com"></div>
-      <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="qlPassword" type="password" placeholder="Your Zendesk password" onkeydown="if(event.key==='Enter')quickLogin()"></div>
+      <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="qlPassword" type="password" placeholder="Zendesk user password" onkeydown="if(event.key==='Enter')quickLogin()"></div>
       <div class="btn-group">
         <button class="btn btn-primary btn-block" id="btnQlLogin" onclick="quickLogin()">Login</button>
       </div>
       <div class="status-box" id="qlStatus"></div>
       <div style="margin-top:12px;text-align:right">
-        <button class="btn btn-outline" onclick="editQlConfig()" style="font-size:11px;padding:4px 10px">⚙️ Edit Config</button>
+        <button class="btn btn-outline" onclick="editQlConfig()" style="font-size:11px;padding:4px 10px">⚙️ Edit Configuration</button>
       </div>
     </div>
   </div>
 
-  <!-- Success card — shown after successful authentication.
-       Displays user info and a logout button that calls zE('messenger', 'logoutUser'). -->
+  <!-- Success card — shown after successful authentication -->
   <div id="qlSuccess" class="card" style="display:none">
     <div class="card-header" style="color:var(--success)">✓ Authenticated</div>
     <div class="card-body">
@@ -1051,9 +1038,12 @@ function updateAuthState() {
 
 // updateQlPage — Checks the server for config (env vars or session) and shows the
 // appropriate User Login sub-view:
-// - If config exists (env vars or session): shows read-only config info and the login form
-// - If no config and no session: shows warning that env vars or Configuration page setup is needed
+// - If config exists (env vars or session): hides the config form and shows the login form
+// - If no config and no session: shows the config form for the user to fill in
 function updateQlPage() {
+  // If already authenticated, just show success card
+  if (_isAuthenticated) return;
+
   // Send sessionId so the server can check session credentials too
   var configUrl = '/api/config';
   if (sessionId) configUrl += '?sessionId=' + encodeURIComponent(sessionId);
@@ -1061,23 +1051,12 @@ function updateQlPage() {
   _rawFetch(configUrl).then(function(r) { return r.json(); }).then(function(data) {
     _qlHasConfig = data.hasConfig;
     if (data.hasConfig) {
-      // Show read-only config fields (non-sensitive only)
-      document.getElementById('qlConfigFields').style.display = '';
-      if (data.subdomain) document.getElementById('qlSubdomain').value = data.subdomain;
-      if (data.adminEmail) document.getElementById('qlAdminEmail').value = data.adminEmail;
-      if (data.appId) document.getElementById('qlAppId').value = data.appId;
-      if (data.keyId) document.getElementById('qlKeyId').value = data.keyId;
-      if (data.widgetKey) document.getElementById('qlWidgetKey').value = data.widgetKey;
-      // Update config source label
-      var sourceLabel = data.configSource === 'session' ? 'from Configuration page session' : 'from environment variables';
-      document.getElementById('qlConfigSource').textContent = sourceLabel;
-      // Show login form
+      // Config exists (env vars or session) — show login form, hide config form
       document.getElementById('qlConfig').style.display = 'none';
       document.getElementById('qlLogin').style.display = '';
       document.getElementById('qlSuccess').style.display = 'none';
     } else {
-      // Show config warning card (no env vars and no session)
-      document.getElementById('qlConfigFields').style.display = 'none';
+      // No config — show config form for user to fill in
       document.getElementById('qlConfig').style.display = '';
       document.getElementById('qlLogin').style.display = 'none';
       document.getElementById('qlSuccess').style.display = 'none';
@@ -1088,32 +1067,69 @@ function updateQlPage() {
   });
 }
 
-// saveQlConfig — No longer saves secrets via the UI.
-// Credentials are managed via environment variables or the Configuration page.
-// This function is kept for backward compat but shows an error directing users.
-function saveQlConfig() {
-  showStatus('qlConfigStatus', 'error', 'Configuration is managed via environment variables or the Configuration page. Set ZENDESK_SUBDOMAIN, ZENDESK_ADMIN_EMAIL, ZENDESK_API_TOKEN, SUNCO_APP_ID, SUNCO_KEY_ID, SUNCO_SECRET, and ZENDESK_WIDGET_KEY on your hosting platform, or save credentials on the Configuration page.');
+// qlSaveConfig — Saves Zendesk configuration from the User Login form.
+// Posts to POST /api/session (same endpoint as Configuration page).
+// On success, clears the form fields and transitions to the login form.
+function qlSaveConfig() {
+  var fields = ['qlSubdomain','qlAdminEmail','qlApiToken','qlAppId','qlKeyId','qlSecret','qlWidgetKey'];
+  var map = {qlSubdomain:'subdomain', qlAdminEmail:'adminEmail', qlApiToken:'apiToken', qlAppId:'appId', qlKeyId:'keyId', qlSecret:'secret', qlWidgetKey:'widgetKey'};
+  var payload = {};
+  for (var i = 0; i < fields.length; i++) {
+    var el = document.getElementById(fields[i]);
+    payload[map[fields[i]]] = el.value.trim();
+  }
+  for (var k in payload) {
+    if (k !== 'widgetKey' && !payload[k]) { showStatus('qlConfigStatus', 'error', 'All fields except Widget Key are required.'); return; }
+  }
+
+  showStatus('qlConfigStatus', 'info', 'Saving configuration…');
+  document.getElementById('btnQlSaveConfig').disabled = true;
+
+  _rawFetch('/api/session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    document.getElementById('btnQlSaveConfig').disabled = false;
+    if (data.sessionId) {
+      sessionId = data.sessionId;
+      sessionStorage.setItem('zd_session_id', sessionId);
+      updateSessionDot();
+      _qlHasConfig = true;
+      // Clear sensitive form fields — never stored locally
+      fields.forEach(function(id) { document.getElementById(id).value = ''; });
+      showStatus('qlConfigStatus', 'success', 'Configuration saved securely. You can now log in.');
+      // Transition to login form
+      document.getElementById('qlConfig').style.display = 'none';
+      document.getElementById('qlLogin').style.display = '';
+      document.getElementById('qlSuccess').style.display = 'none';
+    } else {
+      showStatus('qlConfigStatus', 'error', data.error || 'Failed to save configuration.');
+    }
+  }).catch(function(e) {
+    document.getElementById('btnQlSaveConfig').disabled = false;
+    showStatus('qlConfigStatus', 'error', 'Network error: ' + e.message);
+  });
 }
 
-// editQlConfig — Shows the config info card with config details
+// editQlConfig — Shows the config form so the user can update their credentials.
+// Pre-fills non-sensitive fields from the server (read-only values from env vars or session).
 function editQlConfig() {
   document.getElementById('qlLogin').style.display = 'none';
+  document.getElementById('qlSuccess').style.display = 'none';
   document.getElementById('qlConfig').style.display = '';
-  // Pre-fill non-sensitive fields from server (read-only, from env vars or session)
+
+  // Pre-fill non-sensitive fields from the server config
   var configUrl = '/api/config';
   if (sessionId) configUrl += '?sessionId=' + encodeURIComponent(sessionId);
   _rawFetch(configUrl).then(function(r) { return r.json(); }).then(function(data) {
     if (data.hasConfig) {
-      document.getElementById('qlConfigFields').style.display = '';
       if (data.subdomain) document.getElementById('qlSubdomain').value = data.subdomain;
       if (data.adminEmail) document.getElementById('qlAdminEmail').value = data.adminEmail;
       if (data.appId) document.getElementById('qlAppId').value = data.appId;
       if (data.keyId) document.getElementById('qlKeyId').value = data.keyId;
       if (data.widgetKey) document.getElementById('qlWidgetKey').value = data.widgetKey;
-      var sourceLabel = data.configSource === 'session' ? 'from Configuration page session' : 'from environment variables';
-      document.getElementById('qlConfigSource').textContent = sourceLabel;
-    } else {
-      document.getElementById('qlConfigFields').style.display = 'none';
+      // Sensitive fields (apiToken, secret) are never returned by the server
     }
   }).catch(function() {});
 }
