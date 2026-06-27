@@ -438,6 +438,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
   <div class="doc-section">
     <h3>📖 Overview</h3>
     <p>This application lets you create Zendesk end-user accounts and authenticate them into the Zendesk messaging widget using JWT (JSON Web Token) authentication. It acts as a <strong>backend proxy</strong> — all Zendesk and Sunshine Conversations API calls are made server-side, keeping your credentials and JWT signing secret out of the browser.</p>
+    <p>The app has three pages, each with access controls:</p>
+    <ul>
+      <li><strong>Configuration</strong> — always available. Save Zendesk credentials, then create users, set passwords, and log in.</li>
+      <li><strong>User Login</strong> — locked until Zendesk configuration has been saved and a user has been authenticated. Enter email + password for one-step login.</li>
+      <li><strong>API Logs</strong> — locked until authentication has been performed. View and download logged API calls (credentials redacted).</li>
+    </ul>
   </div>
 
   <div class="doc-section">
@@ -461,7 +467,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
       <tr><td><strong>App ID</strong></td><td>The App ID from the Conversations API key token</td></tr>
       <tr><td><strong>Key ID</strong></td><td>The Key ID from the Conversations API key token (format: <code>app_…</code>)</td></tr>
       <tr><td><strong>Secret Key</strong></td><td>The Secret Key from the same Conversations API key token (used as a raw string for HMAC-SHA256 signing — do NOT base64-decode it)</td></tr>
-      <tr><td><strong>Widget Key</strong></td><td>From Admin Center → Channels → Messaging → Web Widget → Installation</td></tr>
+      <tr><td><strong>Widget Key</strong></td><td>From Admin Center → Channels → Messaging → Web Widget → Installation. <strong>Required</strong> — needed to load the messaging widget.</td></tr>
     </table>
     <p>👉 <a class="doc-link" href="https://support.zendesk.com/hc/en-us/articles/4576088682266-Using-the-Conversations-API-keys" target="_blank">Zendesk: Using the Conversations API keys</a></p>
 
@@ -541,10 +547,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     <h3>🏗️ How the Code Works</h3>
 
     <h4>Architecture</h4>
-    <p>The app consists of two files:</p>
+    <p>The app consists of two main files served from the <code>public/</code> directory:</p>
     <ul>
-      <li><strong><code>server.js</code></strong> — Express backend that proxies all Zendesk/Sunco API calls (avoiding CORS), signs JWTs, stores credentials server-side, and injects the Zendesk snippet into the HTML.</li>
-      <li><strong><code>index.html</code></strong> — Single-page app with four pages (Configuration, User Login, API Logs, Docs). All state management happens client-side, but credentials are never stored in the browser.</li>
+      <li><strong><code>server.js</code></strong> — Express backend that proxies all Zendesk/Sunco API calls (avoiding CORS), signs JWTs, stores credentials server-side, and injects the Zendesk snippet into the HTML. Static files are served only from <code>public/</code> — project files like <code>server.js</code> and <code>package.json</code> are not accessible via HTTP.</li>
+      <li><strong><code>public/index.html</code></strong> — Single-page app with four pages (Configuration, User Login, API Logs, Docs). All state management happens client-side, but credentials are never stored in the browser.</li>
     </ul>
 
     <h4>Two Credential Storage Mechanisms</h4>
@@ -564,7 +570,9 @@ Sign:    HMAC-SHA256(secret_as_raw_string, header_b64url + "." + payload_b64url)
     <p>The <code>kid</code> (Key ID) in the header tells Zendesk which API key was used to sign the token. The <code>scope: "user"</code> claim is required for messenger authentication — using <code>"end_user"</code> will cause a login failure.</p>
 
     <h4>Widget Snippet Injection</h4>
-    <p>The Zendesk messaging widget (<code>snippet.js</code>) <strong>cannot</strong> be loaded dynamically via <code>document.createElement('script')</code> after page load — this causes an <code>InboundFilters</code> crash in the SDK's module loader. Instead, when User Login succeeds, the page redirects to <code>/?wk=WIDGET_KEY&sd=SUBDOMAIN</code>. The server intercepts this request, reads <code>index.html</code>, injects the <code>&lt;script id="ze-snippet"&gt;</code> tag into <code>&lt;head&gt;</code>, and serves the modified HTML. This way the snippet is part of the initial HTML parse, exactly as Zendesk intends.</p>
+    <p>The Zendesk messaging widget (<code>snippet.js</code>) <strong>cannot</strong> be loaded dynamically via <code>document.createElement('script')</code> after page load — this causes an <code>InboundFilters</code> crash in the SDK's module loader. Instead, when User Login succeeds, the page redirects to <code>/?wk=WIDGET_KEY&sd=SUBDOMAIN</code>. The server intercepts this request, reads <code>public/index.html</code>, injects the <code>&lt;script id="ze-snippet"&gt;</code> tag into <code>&lt;head&gt;</code>, and serves the modified HTML. This way the snippet is part of the initial HTML parse, exactly as Zendesk intends.</p>
+    <p>The <code>wk</code> (Widget Key) and <code>sd</code> (subdomain) query parameters are validated server-side: <code>wk</code> must be a UUID, <code>sd</code> must be a valid subdomain format. Invalid values return <code>400 Bad Request</code>. Both values are HTML-encoded before injection to prevent reflected XSS.</p>
+    <p>Each page response includes a per-request Content Security Policy with a unique nonce in <code>script-src</code>. The nonce is injected into all <code>&lt;script&gt;</code> tags at serve time, preventing injected scripts from executing. The <code>script-src-attr</code> directive allows <code>'unsafe-inline'</code> for <code>onclick</code> event handlers, which are server-controlled and not an XSS vector.</p>
 
     <h4>Fetch Interceptor</h4>
     <p>The frontend replaces <code>window.fetch</code> with an interceptor that schedules an API log refresh after every non-<code>/api/logs</code> call. This ensures the API Logs page stays current without manual refresh. The original <code>fetch</code> is preserved as <code>_rawFetch</code> for internal use (so log refreshes don't trigger recursive refreshes).</p>
@@ -602,9 +610,12 @@ Sign:    HMAC-SHA256(secret_as_raw_string, header_b64url + "." + payload_b64url)
       <li><strong>Sessions expire after 15 minutes of inactivity</strong> — in-memory credential store has a TTL to limit exposure.</li>
       <li><strong>JWTs expire after 15 minutes</strong> — reduced from 1 hour. A jti (JWT ID) blocklist supports revocation.</li>
       <li><strong>Rate limiting</strong> — authentication and user-creation endpoints are rate-limited (5–20 req/15min per IP).</li>
-      <li><strong>Security headers</strong> — helmet middleware sets CSP, X-Frame-Options, X-Content-Type-Options, and more.</li>
-      <li><strong>Input validation</strong> — email, name, external ID, and password fields are validated and sanitized before use.</li>
+      <li><strong>Security headers</strong> — helmet middleware sets CSP, X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security, and more.</li>
+      <li><strong>Per-request CSP nonces</strong> — each page response includes a unique nonce in <code>script-src</code>. Only <code>&lt;script&gt;</code> tags with the matching nonce can execute, preventing injected scripts from running.</li>
+      <li><strong>Input validation & XSS prevention</strong> — query parameters (<code>wk</code>, <code>sd</code>) are validated against strict allowlists (UUID format, subdomain format) and HTML-encoded before injection into the page. Invalid values return <code>400 Bad Request</code>.</li>
+      <li><strong>Source code protection</strong> — static files are served only from the <code>public/</code> directory. Project files like <code>server.js</code>, <code>package.json</code>, and <code>.env</code> return <code>404 Not Found</code>.</li>
       <li><strong>Production error handling</strong> — stack traces are never leaked to clients in production mode.</li>
+      <li><strong>robots.txt</strong> — disallows all crawler access.</li>
     </ul>
   </div>
 
