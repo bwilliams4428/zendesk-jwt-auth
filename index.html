@@ -405,12 +405,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 <!-- ==================== PAGE: API Logs ==================== -->
 <!-- Displays all server-side API calls (Zendesk, Sunco, JWT) with method,
      status, and expandable request/response details. Auto-refreshes after
-     each API call via the fetch interceptor. Sensitive fields are redacted. -->
+     each API call via the fetch interceptor. Sensitive fields are redacted.
+     Download button is only available after the user has logged into the widget. -->
 <div class="page" id="pageLogs">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
     <h2 style="font-size:18px;font-weight:700;color:var(--text)">API Logs</h2>
     <div style="display:flex;gap:8px">
       <button class="btn btn-outline" style="font-size:12px;padding:6px 12px" onclick="refreshLogs()">↻ Refresh</button>
+      <button class="btn btn-outline" id="btnDownloadLogs" style="font-size:12px;padding:6px 12px;display:none" onclick="downloadLogs()">⬇ Download</button>
       <button class="btn btn-outline" style="font-size:12px;padding:6px 12px;color:var(--error);border-color:#f0b8bc" onclick="clearLogs()">✕ Clear</button>
     </div>
   </div>
@@ -915,6 +917,8 @@ function configLogin() {
 function configLogout() {
   try { zE('messenger', 'logoutUser'); } catch(e) {}
   try { zE('messenger', 'close'); } catch(e) {}
+  _isAuthenticated = false;
+  updateAuthState();
   document.getElementById('configAuthSuccess').style.display = 'none';
   document.getElementById('btnConfigLogin').style.display = '';
   document.getElementById('btnConfigLogin').disabled = false;
@@ -998,6 +1002,8 @@ function authenticateUser(jwt, user) {
         showStatus('qlStatus', 'error', 'Authentication failed: ' + error.message + ' (' + error.reason + ')');
       } else {
         showStatus('qlStatus', 'success', 'Authenticated! The messaging widget is now active.');
+        _isAuthenticated = true;
+        updateAuthState();
 
         // Open the messenger
         try { zE('messenger', 'open'); } catch(e) { console.warn('[Zendesk] open error:', e); }
@@ -1013,6 +1019,16 @@ function authenticateUser(jwt, user) {
 // _qlHasConfig — tracks whether the server has a persisted config.
 // Used to determine whether to show the config form or the login form.
 var _qlHasConfig = false;
+
+// _isAuthenticated — tracks whether the user has logged into the widget.
+// Used to show/hide the download logs button.
+var _isAuthenticated = false;
+
+// updateAuthState — shows or hides the download logs button based on auth state.
+function updateAuthState() {
+  var btn = document.getElementById('btnDownloadLogs');
+  if (btn) btn.style.display = _isAuthenticated ? '' : 'none';
+}
 
 // updateQlPage — Checks the server for config (env vars or session) and shows the
 // appropriate User Login sub-view:
@@ -1143,6 +1159,8 @@ function quickLogout() {
   try { zE('messenger', 'logoutUser'); } catch(e) {}
   try { zE('messenger', 'close'); } catch(e) {}
 
+  _isAuthenticated = false;
+  updateAuthState();
   document.getElementById('qlSuccess').style.display = 'none';
   document.getElementById('qlLogin').style.display = '';
   document.getElementById('qlPassword').value = '';
@@ -1218,6 +1236,9 @@ function fullReset() {
   sessionStorage.removeItem('zd_config_state');
   sessionStorage.removeItem('zd_from_config');
 
+  _isAuthenticated = false;
+  updateAuthState();
+
   switchPage('setup');
 }
 
@@ -1248,11 +1269,14 @@ function showStatus(elId, type, msg) {
 var _rawFetch = window.fetch.bind(window);
 var _lastLogHash = '';
 var _refreshPending = false;
+var _logData = []; // Stores log data for download
 
 // refreshLogs — Fetches all API logs from GET /api/logs and renders them.
 // Called automatically when switching to the Logs page and after each API call.
 function refreshLogs() {
-  _rawFetch('/api/logs').then(function(r) { return r.json(); }).then(function(data) {
+  var url = '/api/logs';
+  if (sessionId) url += '?sessionId=' + encodeURIComponent(sessionId);
+  _rawFetch(url).then(function(r) { return r.json(); }).then(function(data) {
     renderLogs(data.logs || []);
   }).catch(function() {});
 }
@@ -1261,8 +1285,61 @@ function refreshLogs() {
 function clearLogs() {
   _rawFetch('/api/logs', { method: 'DELETE' }).then(function() {
     _lastLogHash = '';
+    _logData = [];
     renderLogs([]);
   }).catch(function() {});
+}
+
+// ============================================================
+// DOWNLOAD LOGS — exports all API logs as a text file
+// ============================================================
+// Generates a human-readable text file with timestamped entries
+// showing method, endpoint, status, request/response details.
+// Only available after the user has logged into the widget.
+function downloadLogs() {
+  if (!_isAuthenticated) return;
+  if (!_logData || _logData.length === 0) {
+    showStatus('qlStatus', 'info', 'No logs to download.');
+    return;
+  }
+
+  var lines = [];
+  lines.push('Zendesk JWT Auth — API Logs');
+  lines.push('Exported: ' + new Date().toLocaleString());
+  lines.push('Total entries: ' + _logData.length);
+  lines.push('='.repeat(80));
+  lines.push('');
+
+  for (var i = 0; i < _logData.length; i++) {
+    var log = _logData[i];
+    lines.push('[' + (log.timestamp ? new Date(log.timestamp).toLocaleString() : 'N/A') + ']');
+    lines.push('  ' + (log.method || '?') + ' ' + (log.action || 'Unknown'));
+    lines.push('  Status: ' + (log.status || '') + ' ' + (log.result || ''));
+    if (log.endpoint) lines.push('  Endpoint: ' + log.method + ' ' + log.endpoint);
+    if (log.fullUrl) lines.push('  URL: ' + log.fullUrl);
+    if (log.note) lines.push('  Note: ' + log.note);
+    if (log.request && Object.keys(log.request).length > 0) {
+      lines.push('  Request:');
+      lines.push('    ' + JSON.stringify(log.request, null, 2).split('\n').join('\n    '));
+    }
+    if (log.response) {
+      lines.push('  Response:');
+      lines.push('    ' + JSON.stringify(log.response, null, 2).split('\n').join('\n    '));
+    }
+    lines.push('-'.repeat(80));
+    lines.push('');
+  }
+
+  var text = lines.join('\n');
+  var blob = new Blob([text], { type: 'text/plain' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'api-logs-' + new Date().toISOString().slice(0, 10) + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // renderLogs — Renders the log entries into the #logList container.
@@ -1272,6 +1349,7 @@ function clearLogs() {
 // Each entry shows: method badge, action label, status badge, and timestamp.
 // Expanding shows: endpoint, full URL, note, request body, response body.
 function renderLogs(logs) {
+  _logData = logs; // Store for download
   var list = document.getElementById('logList');
   var countEl = document.getElementById('logCount');
   var navBadge = document.getElementById('navLogBadge');
@@ -1510,8 +1588,12 @@ if (sessionId) {
         document.getElementById('configAuthInfo').innerHTML =
           '<strong>' + escapeHtml(user.name) + '</strong> (' + escapeHtml(user.email) + ')<br>External ID: ' + escapeHtml(user.externalId);
         showStatus('step3Status', 'success', 'Authenticated! The messaging widget is now active.');
+        _isAuthenticated = true;
+        updateAuthState();
       } else {
         // Came from User Login — show User Login success card
+        _isAuthenticated = true;
+        updateAuthState();
         switchPage('quicklogin');
         document.getElementById('qlConfig').style.display = 'none';
         document.getElementById('qlLogin').style.display = 'none';
