@@ -52,11 +52,14 @@ app.use(express.json({ limit: '100kb' })); // Limit payload size
 
 // HIGH 6: Security headers via helmet
 app.use(helmet({
+  // HIGH 1 FIX: CSP now uses per-request nonces (set in the GET / handler)
+  // instead of 'unsafe-inline'. Helmet provides a fallback CSP for non-HTML responses.
+  // The actual CSP for HTML pages is set per-request with a unique nonce.
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://static.zdassets.com", "https://api.smooch.io"],
-      scriptSrcAttr: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "https://static.zdassets.com", "https://api.smooch.io"],
+      scriptSrcAttr: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "https://www.gravatar.com", "https://*.zdassets.com"],
       connectSrc: ["'self'", "https://*.zendesk.com", "https://*.zdassets.com", "https://api.smooch.io", "wss://api.smooch.io", "https://*.smooch.io"],
@@ -207,22 +210,92 @@ function requireAuth(req, res, next) {
 app.use('/api/', requireAuth);
 
 // ============================================================
+// INPUT SANITIZATION — prevent injection attacks (HIGH 1 fix)
+// ============================================================
+// Allowlist validation for query parameters that are injected into HTML.
+// wk (widget key): UUID format only (e.g., 8b5a738b-fb7a-42c5-95a6-1cb26e82900a)
+// sd (subdomain): alphanumeric + hyphens only (e.g., z3nbwilliams)
+const WIDGET_KEY_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SUBDOMAIN_REGEX = /^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/i;
+
+function htmlEncode(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// ============================================================
+// CSP NONCE — per-request nonce for inline scripts (HIGH 1 fix)
+// ============================================================
+// Replaces 'unsafe-inline' in script-src with a per-request nonce.
+// Only inline scripts with the matching nonce attribute will execute.
+function cspNonce() {
+  return crypto.randomBytes(16).toString('base64');
+}
+
+// ============================================================
 // SERVE FRONTEND — with optional Zendesk snippet injection
 // ============================================================
+// HIGH 1 FIX: wk and sd parameters are validated against strict allowlists
+// and HTML-encoded before insertion. The snippet is injected using a
+// nonce-attribute <script> tag instead of raw string concatenation,
+// and CSP script-src uses nonces instead of 'unsafe-inline'.
 app.get('/', (req, res) => {
   const widgetKey = req.query.wk;
   if (!widgetKey) {
-    return res.sendFile(path.join(__dirname, 'index.html'));
+    // No widget key — serve plain page without Zendesk snippet
+    const nonce = cspNonce();
+    let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+    // Inject nonce into actual <script> tags only (not text inside comments)
+    // Matches <script> or <script ...> but not the word "script" in prose
+    html = html.replace(/<script(?=\s|>)(?![^>]*nonce=)/g, `<script nonce="${nonce}"`);
+    html = html.replace('<!-- CSP_NONCE -->', nonce);
+    res.setHeader('Content-Security-Policy',
+      `default-src 'self'; script-src 'self' 'nonce-${nonce}' https://static.zdassets.com https://api.smooch.io; script-src-attr 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.gravatar.com https://*.zdassets.com; connect-src 'self' https://*.zendesk.com https://*.zdassets.com https://api.smooch.io wss://api.smooch.io https://*.smooch.io; frame-src https://*.zendesk.com https://*.zdassets.com https://*.smooch.io; font-src 'self' https: data:; object-src 'none'; base-uri 'self'; form-action 'self'`
+    );
+    return res.send(html);
   }
-  let html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-  const subdomain = req.query.sd || 'your-subdomain';
-  const snippetTag = `\n<!-- Start of '${subdomain}' Zendesk Widget script -->\n<script id="ze-snippet" src="https://static.zdassets.com/ekr/snippet.js?key=${widgetKey}"> </script>\n<!-- End of ${subdomain} Zendesk Widget script -->`;
+
+  // Validate widget key format (must be UUID)
+  if (!WIDGET_KEY_REGEX.test(widgetKey)) {
+    return res.status(400).send('Invalid widget key format.');
+  }
+
+  const subdomain = req.query.sd || '';
+  // Validate subdomain format if provided
+  if (subdomain && !SUBDOMAIN_REGEX.test(subdomain)) {
+    return res.status(400).send('Invalid subdomain format.');
+  }
+
+  const nonce = cspNonce();
+  let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+
+  // Inject nonce into actual <script> tags only (not text inside comments)
+  html = html.replace(/<script(?=\s|>)(?![^>]*nonce=)/g, `<script nonce="${nonce}"`);
+
+  // Replace CSP_NONCE placeholder
+  html = html.replace('<!-- CSP_NONCE -->', nonce);
+
+  // Build the snippet tag safely — values are already validated and will be HTML-encoded
+  const safeWk = htmlEncode(widgetKey);
+  const safeSd = htmlEncode(subdomain || 'your-subdomain');
+  const snippetTag = `\n<!-- Start of '${safeSd}' Zendesk Widget script -->\n<script nonce="${nonce}" id="ze-snippet" src="https://static.zdassets.com/ekr/snippet.js?key=${safeWk}"> </script>\n<!-- End of ${safeSd} Zendesk Widget script -->`;
   html = html.replace('</head>', snippetTag + '\n</head>');
+
+  res.setHeader('Content-Security-Policy',
+    `default-src 'self'; script-src 'self' 'nonce-${nonce}' https://static.zdassets.com https://api.smooch.io; script-src-attr 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.gravatar.com https://*.zdassets.com; connect-src 'self' https://*.zendesk.com https://*.zdassets.com https://api.smooch.io wss://api.smooch.io https://*.smooch.io; frame-src https://*.zendesk.com https://*.zdassets.com https://*.smooch.io; font-src 'self' https: data:; object-src 'none'; base-uri 'self'; form-action 'self'`
+  );
   res.send(html);
 });
 
-// Serve static files
-app.use(express.static(path.join(__dirname)));
+// LOW 2 FIX: Serve only the public/ directory, not the project root.
+// This prevents source-code disclosure (GET /server.js, GET /package.json).
+// index.html and favicon.ico are served from public/ — the GET / handler
+// also reads from public/ for snippet injection.
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Serve robots.txt — disallow all crawlers (INFO 12)
 app.get('/robots.txt', (req, res) => {

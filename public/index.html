@@ -1,0 +1,1648 @@
+<!DOCTYPE html>
+<!--
+  Zendesk JWT Auth — Single-Page Application
+  
+  ARCHITECTURE:
+  This is the frontend for a Zendesk JWT authentication tool. It works with
+  server.js (Express) which proxies all Zendesk/Sunco API calls to avoid CORS
+  issues and keeps the JWT Secret Key server-side.
+  
+  PAGES:
+  1. Configuration — Save Zendesk admin + Sunco credentials (server-side session),
+     then create a Zendesk end-user and set their password.
+  2. User Login — Authenticate an existing Zendesk user via JWT. Uses persisted
+     config from environment variables so no session is needed. Generates a JWT server-side,
+     redirects to /?wk=KEY for snippet injection, then authenticates via zE().
+  3. API Logs — View all server-side API calls with expandable details.
+  
+  AUTH FLOW (User Login):
+  1. User enters email + password → POST /api/quick-login
+  2. Server looks up Zendesk user by email, generates JWT
+  3. Frontend stores auth data in sessionStorage, redirects to /?wk=WIDGET_KEY
+  4. Server injects Zendesk snippet <script> into <head>
+  5. On page load, auto-login IIFE authenticates via zE('messenger', 'loginUser')
+  
+  SECURITY:
+  - Credentials are never stored in the browser (only sessionId or persisted config)
+  - Sensitive fields in API logs are redacted (password, apiToken, secret, authorization)
+  - JWT is generated server-side; the Secret Key never reaches the browser
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zendesk JWT Auth</title>
+<style>
+/* ============================================================
+   CSS DESIGN SYSTEM
+   ============================================================
+   Uses CSS custom properties (variables) for theming:
+   - Colors: --primary (indigo), --success (green), --error (red), --warning (amber)
+   - Surfaces: --bg (page), --surface (cards), --border
+   - Text: --text (primary), --text2 (secondary), --text3 (muted)
+   - Layout: --radius (10px), --radius-sm (6px), --shadow, --shadow-md
+   - Transitions: --transition (all .2s ease) for hover/focus effects
+   
+   Components:
+   - .top-nav — sticky nav with tabs and session indicator
+   - .card/.card-header/.card-body — content cards with header divider
+   - .btn variants: .btn-primary, .btn-outline, .btn-success, .btn-back, .btn-block
+   - .status-box — contextual feedback (success/error/info)
+   - .form-group/.form-label/.form-input — form field styling
+   - .steps-bar/.step-dot/.step-line — 2-step wizard progress indicator
+   - .log-entry — expandable API log entries with method badges
+   ============================================================ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f5f6f8;--surface:#fff;--surface2:#f0f2f5;--border:#d4d9e0;--border-focus:#03363D;
+  --text:#1f1f24;--text2:#555760;--text3:#81858e;
+  --primary:#03363D;--primary-hover:#024e5c;--primary-light:#e8f4f5;
+  --success:#1a7a54;--success-light:#e6f7ee;--error:#cc3340;--error-light:#fde8ea;
+  --warning:#9a6800;--warning-light:#fef5e4;
+  --radius:10px;--radius-sm:6px;--shadow:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);--shadow-md:0 4px 12px rgba(0,0,0,.08);
+  --transition:all .2s ease;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+
+.top-nav{position:sticky;top:0;z-index:100;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;height:56px;gap:4px}
+.nav-brand{font-weight:700;font-size:15px;color:var(--primary);margin-right:24px;white-space:nowrap;letter-spacing:-.3px}
+.nav-tab{padding:8px 16px;font-size:14px;font-weight:500;color:var(--text3);border:none;background:0;border-radius:var(--radius-sm);cursor:pointer;transition:var(--transition);position:relative}
+.nav-tab:hover{background:var(--primary-light);color:var(--primary)}
+.nav-tab.active{color:var(--primary);background:var(--primary-light)}
+.nav-badge{position:absolute;top:2px;right:2px;background:var(--primary);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:none;align-items:center;justify-content:center;padding:0 4px}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+
+.btn-reset{padding:6px 14px;font-size:12px;font-weight:600;color:var(--error);background:var(--error-light);border:1px solid #f0b8bc;border-radius:var(--radius-sm);cursor:pointer;transition:var(--transition)}
+.btn-reset:hover{background:#fdd5d9;border-color:#e8898f}
+.btn-reset:active{transform:scale(.97)}
+
+.session-dot{width:8px;height:8px;border-radius:50%;background:var(--text3);display:inline-block;margin-right:4px}
+.session-dot.active{background:var(--success)}
+.session-label{font-size:11px;color:var(--text3)}
+
+.page{display:none;max-width:720px;margin:0 auto;padding:32px 24px}
+.page.active{display:block}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:20px;overflow:hidden}
+.card-header{padding:16px 20px;border-bottom:1px solid var(--border);font-weight:600;font-size:14px;color:var(--text);display:flex;align-items:center;gap:8px}
+.card-body{padding:20px}
+
+.form-group{margin-bottom:16px}
+.form-group:last-child{margin-bottom:0}
+.form-label{display:block;font-size:13px;font-weight:600;color:var(--text2);margin-bottom:6px}
+.form-input{width:100%;padding:10px 12px;font-size:14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);transition:var(--transition);outline:0}
+.form-input:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(3,54,61,.12)}
+.form-input::placeholder{color:var(--text3)}
+.form-input:disabled{background:var(--surface2);cursor:not-allowed}
+.form-hint{font-size:11px;color:var(--text3);margin-top:4px}
+.form-row{display:flex;gap:12px}
+.form-row .form-group{flex:1}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 20px;font-size:14px;font-weight:600;border:none;border-radius:var(--radius-sm);cursor:pointer;transition:var(--transition);outline:0}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover:not(:disabled){background:var(--primary-hover)}
+.btn-outline{background:0;color:var(--primary);border:1px solid var(--border)}
+.btn-outline:hover:not(:disabled){background:var(--primary-light);border-color:var(--primary)}
+.btn-success{background:var(--success);color:#fff}
+.btn-success:hover:not(:disabled){background:#156b46}
+.btn-back{background:0;color:var(--text2);font-size:13px;padding:6px 10px;border:1px solid var(--border)}
+.btn-back:hover{background:var(--surface2);color:var(--text)}
+.btn-block{width:100%}
+.btn-group{display:flex;gap:10px;margin-top:16px}
+
+.status-box{padding:12px 16px;border-radius:var(--radius-sm);font-size:13px;line-height:1.5;margin-top:12px;display:none;white-space:pre-wrap;word-break:break-word}
+.status-box.show{display:block}
+.status-success{background:var(--success-light);color:#0a5c3a;border:1px solid #b2dfca}
+.status-error{background:var(--error-light);color:#8b1a24;border:1px solid #f0b8bc}
+.status-info{background:var(--primary-light);color:var(--primary);border:1px solid #b8dfe3}
+
+.collapse-toggle{display:flex;align-items:center;justify-content:space-between;width:100%;background:0;border:0;padding:0;cursor:pointer;font:inherit;color:var(--text2);font-size:13px;font-weight:600}
+.collapse-toggle:hover{color:var(--primary)}
+.collapse-arrow{font-size:10px;transition:transform .2s}
+.collapse-toggle.open .collapse-arrow{transform:rotate(90deg)}
+.collapse-body{max-height:0;overflow:hidden;transition:max-height .3s ease}
+.collapse-body.open{max-height:600px}
+.collapse-content{padding-top:12px}
+
+.steps-bar{display:flex;align-items:center;gap:4px;margin-bottom:24px}
+.step-dot{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;background:var(--surface2);color:var(--text3);transition:var(--transition)}
+.step-dot.active{background:var(--primary);color:#fff}
+.step-dot.done{background:var(--success);color:#fff}
+.step-line{flex:1;height:2px;background:var(--border)}
+.step-line.done{background:var(--success)}
+
+.log-empty{text-align:center;padding:48px 20px;color:var(--text3)}
+.log-empty-icon{font-size:40px;margin-bottom:12px}
+.log-empty-title{font-size:16px;font-weight:600;color:var(--text2);margin-bottom:6px}
+.log-entry{border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;overflow:hidden;transition:var(--transition)}
+.log-entry-header{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;font-size:13px;background:#fafbfc;transition:var(--transition)}
+.log-entry-header:hover{background:var(--primary-light)}
+.log-method{font-size:11px;font-weight:700;padding:2px 7px;border-radius:3px;color:#fff;min-width:42px;text-align:center}
+.log-method.POST{background:#03363D}
+.log-method.GET{background:#1a7a54}
+.log-method.PATCH{background:#9a6800}
+.log-method.DELETE{background:#cc3340}
+.log-action{flex:1;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.log-status{font-size:12px;font-weight:600;padding:2px 8px;border-radius:3px}
+.log-status.success{background:var(--success-light);color:#0a5c3a}
+.log-status.error{background:var(--error-light);color:#8b1a24}
+.log-status.conflict{background:var(--warning-light);color:#6d4900}
+.log-time{font-size:11px;color:var(--text3);white-space:nowrap}
+.log-entry-body{max-height:0;overflow:hidden;transition:max-height .3s ease}
+.log-entry.open .log-entry-body{max-height:2000px;overflow-y:auto}
+.log-section{padding:8px 14px;border-top:1px solid #eef0f3}
+.log-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:4px}
+.log-json{font-family:'SF Mono',SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;color:var(--text);background:#f8f9fa;padding:8px 10px;border-radius:4px;border:1px solid var(--border)}
+
+
+
+@media(max-width:640px){.form-row{flex-direction:column;gap:0}.top-nav{padding:0 12px}.page{padding:20px 12px}}
+
+/* Documentation page styles */
+.doc-section{margin-bottom:28px}
+.doc-section h3{font-size:15px;font-weight:700;color:var(--text);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.doc-section h4{font-size:14px;font-weight:600;color:var(--primary);margin:16px 0 6px}
+.doc-section p,.doc-section li{font-size:13.5px;line-height:1.65;color:var(--text2)}
+.doc-section ul,.doc-section ol{margin:6px 0 6px 20px;padding:0}
+.doc-section li{margin-bottom:4px}
+.doc-section code{font-family:'SF Mono',SFMono-Regular,Consolas,monospace;font-size:12px;background:#eef0f3;padding:2px 6px;border-radius:3px;color:var(--primary)}
+.doc-section pre{font-family:'SF Mono',SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.6;background:#f8f9fa;padding:14px 16px;border-radius:var(--radius-sm);border:1px solid var(--border);overflow-x:auto;margin:8px 0 12px;color:var(--text)}
+.doc-link{color:var(--primary);text-decoration:none;font-weight:500}
+.doc-link:hover{text-decoration:underline}
+.doc-step{display:flex;gap:12px;margin:8px 0;align-items:flex-start}
+.doc-step-num{min-width:28px;height:28px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;margin-top:2px}
+.doc-step-text{font-size:13.5px;line-height:1.65;color:var(--text2)}
+.doc-callout{background:var(--primary-light);border:1px solid #b8dfe3;border-radius:var(--radius-sm);padding:12px 16px;font-size:13px;color:#034048;margin:10px 0}
+.doc-callout.warn{background:var(--warning-light);border-color:#e8cb8a;color:#6d4900}
+.doc-table{width:100%;border-collapse:collapse;margin:8px 0 12px;font-size:13px}
+.doc-table th{text-align:left;background:#eef0f3;padding:8px 12px;font-weight:600;border-bottom:1px solid var(--border);color:var(--text)}
+.doc-table td{padding:8px 12px;border-bottom:1px solid #eef0f3;color:var(--text2)}
+.doc-table code{font-size:11.5px}
+</style>
+</head>
+<body>
+
+<!-- ==================== NAVIGATION BAR ==================== -->
+<!-- Three tabs: Configuration, User Login, API Logs.
+     Session indicator (green dot) shows if server-side credentials are stored.
+     "Reset All" clears everything: session, config, logs, widget. -->
+<nav class="top-nav">
+  <div class="nav-brand">Zendesk JWT Auth</div>
+  <button class="nav-tab active" data-page="setup" onclick="switchPage('setup')">Configuration</button>
+  <button class="nav-tab" data-page="quicklogin" onclick="switchPage('quicklogin')">User Login</button>
+  <button class="nav-tab" data-page="logs" onclick="switchPage('logs')">API Logs <span class="nav-badge" id="navLogBadge"></span></button>
+  <button class="nav-tab" data-page="docs" onclick="switchPage('docs')">Docs</button>
+  <div class="nav-right">
+    <span class="session-dot" id="sessionDot"></span>
+    <span class="session-label" id="sessionLabel">No session</span>
+    <button class="btn-reset" onclick="fullReset()">Reset All</button>
+  </div>
+</nav>
+
+<!-- ==================== PAGE: Configuration ==================== -->
+<div class="page active" id="pageSetup">
+
+  <div style="background:var(--primary-light);border:1px solid #b8dfe3;border-radius:var(--radius);padding:20px;margin-bottom:20px;font-size:13px;color:#034048;line-height:1.7">
+    <strong style="font-size:14px;display:block;margin-bottom:6px">ℹ️ About This Page</strong>
+    This page stores your <strong>Zendesk admin credentials</strong> so the app can create user accounts and generate JWT tokens on your behalf. These credentials are <strong>never saved in the browser</strong> — they are held securely on the server and used only for API calls.
+    <br><br>
+    <strong>What you'll need:</strong>
+    <ul style="margin:4px 0 0 20px">
+      <li><strong>Subdomain & Admin credentials</strong> — to create Zendesk end-user accounts</li>
+      <li><strong>Sunco App ID, Key ID & Secret Key</strong> — to create Sunshine Conversations user profiles and sign JWT tokens</li>
+      <li><strong>Widget Key</strong> — to load the Zendesk messaging widget (optional for config, required for login)</li>
+    </ul>
+    <br>
+    Once configured, you'll create a Zendesk end-user account by providing a <strong>full name</strong> and <strong>email address</strong> — the <strong>external ID</strong> is automatically generated from the email. You'll then set a <strong>password</strong> for the account and log in to open an authenticated messaging session via JWT.
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      🛡️ Zendesk Configuration
+      <span id="configLock" style="font-size:11px;color:var(--success);display:none">✓ Saved server-side</span>
+    </div>
+    <div class="card-body">
+      <div id="configSection">
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Subdomain</label><input class="form-input" id="cfgSubdomain" placeholder="e.g. z3nbwilliams"></div>
+          <div class="form-group"><label class="form-label">Admin Email</label><input class="form-input" id="cfgAdminEmail" placeholder="admin@company.com"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">API Token</label><input class="form-input" id="cfgApiToken" type="password" placeholder="Zendesk API token"></div>
+          <div class="form-group"><label class="form-label">Sunco App ID</label><input class="form-input" id="cfgAppId" placeholder="e.g. 62225595c1fb3a00ef92bac9"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Sunco Key ID</label><input class="form-input" id="cfgKeyId" placeholder="e.g. app_6a2e3b044862d1b9713a62a1"></div>
+          <div class="form-group"><label class="form-label">Sunco Secret Key</label><input class="form-input" id="cfgSecret" type="password" placeholder="JWT Shared Secret (as shown in Admin Center)"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Widget Key</label>
+          <input class="form-input" id="cfgWidgetKey" placeholder="e.g. 8b5a738b-fb7a-42c5-95a6-1cb26e82900a">
+          <div class="form-hint">Found in Admin Center → Channels → Messaging → Web Widget → Installation</div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="saveConfig()">Save Configuration</button>
+        </div>
+        <div class="form-hint" style="margin-top:8px">Credentials are stored server-side only and never saved in the browser.</div>
+        <div class="status-box" id="configStatus"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="stepsSection" style="display:none">
+    <div class="steps-bar">
+      <div class="step-dot active" id="stepDot1">1</div><div class="step-line" id="stepLine1"></div>
+      <div class="step-dot" id="stepDot2">2</div><div class="step-line" id="stepLine2"></div>
+      <div class="step-dot" id="stepDot3">3</div>
+    </div>
+
+  <!-- Step 1: Create Zendesk User — sends name, email, externalId to POST /api/zendesk-users -->
+  <div class="card" id="step1">
+      <div class="card-header">1. Create Zendesk End-User</div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="userName" placeholder="John Doe"></div>
+          <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="userEmail" placeholder="user@company.com" oninput="autoGenerateExternalId()"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">External ID</label>
+          <input class="form-input" id="userExternalId" placeholder="Auto-generated from email">
+          <div class="form-hint">Automatically generated from email. Edit if needed.</div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" id="btnCreateUser" onclick="createZendeskUser()">Create User</button>
+        </div>
+        <div class="status-box" id="step1Status"></div>
+      </div>
+    </div>
+
+  <!-- Step 2: Set Password — sends userId + password to POST /api/zendesk-users/:id/password -->
+  <div class="card" id="step2" style="display:none">
+      <div class="card-header">2. Set Password</div>
+      <div class="card-body">
+        <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="userPassword" type="password" placeholder="Set a password for the user"><div class="form-hint">Min 5 characters</div></div>
+        <div class="btn-group">
+          <button class="btn btn-primary" id="btnSetPassword" onclick="setPassword()">Set Password</button>
+        </div>
+        <div class="status-box" id="step2Status"></div>
+      </div>
+    </div>
+
+  <!-- Step 3: Login — authenticate via JWT and open messaging widget -->
+  <div class="card" id="step3" style="display:none">
+      <div class="card-header">3. Login & Open Widget</div>
+      <div class="card-body">
+        <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Click the button below to authenticate into the Zendesk messaging widget. This will create a Sunco user profile, generate a JWT, and open the messaging widget.</p>
+        <div class="btn-group">
+          <button class="btn btn-primary" id="btnConfigLogin" onclick="configLogin()">Login & Open Widget</button>
+        </div>
+        <div class="status-box" id="step3Status"></div>
+        <!-- Authenticated state (shown after successful login) -->
+        <div id="configAuthSuccess" style="display:none">
+          <div style="font-size:13px;margin-top:12px;padding:12px;background:var(--success-light);border-radius:var(--radius-sm);border:1px solid #b2dfca">
+            <strong style="color:#0a5c3a">✓ Authenticated</strong>
+            <div id="configAuthInfo" style="margin-top:6px"></div>
+          </div>
+          <div class="btn-group" style="margin-top:8px">
+            <button class="btn btn-outline" onclick="configLogout()" style="color:var(--error);border-color:#f0b8bc">Logout & Close Widget</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PAGE: User Login ==================== -->
+<div class="page" id="pageQuicklogin">
+  <div style="background:var(--primary-light);border:1px solid #b8dfe3;border-radius:var(--radius);padding:20px;margin-bottom:20px;font-size:13px;color:#034048;line-height:1.7">
+    <strong style="font-size:14px;display:block;margin-bottom:6px">ℹ️ How User Login Works</strong>
+    User Login lets you authenticate as a Zendesk end-user into the messaging widget. Enter your Zendesk configuration, then log in with a Zendesk user account.
+    <br><br>
+    <strong>Steps:</strong>
+    <ol style="margin:4px 0 0 20px;padding-left:16px">
+      <li><strong>Save Configuration</strong> — Enter your Zendesk and Sunshine Conversations credentials</li>
+      <li><strong>Login</strong> — Provide a Zendesk user's email and password</li>
+      <li><strong>Chat</strong> — The messaging widget opens with an authenticated session</li>
+    </ol>
+  </div>
+
+  <!-- Step 1: Zendesk Configuration form — editable inputs, same fields as Configuration page -->
+  <div id="qlConfig" class="card">
+    <div class="card-header">⚙️ Zendesk Configuration</div>
+    <div class="card-body">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Subdomain</label><input class="form-input" id="qlSubdomain" placeholder="e.g. z3nbwilliams"></div>
+        <div class="form-group"><label class="form-label">Admin Email</label><input class="form-input" id="qlAdminEmail" placeholder="admin@company.com"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">API Token</label><input class="form-input" id="qlApiToken" type="password" placeholder="Zendesk API token"></div>
+        <div class="form-group"><label class="form-label">Sunco App ID</label><input class="form-input" id="qlAppId" placeholder="e.g. 62225595c1fb3a00ef92bac9"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Sunco Key ID</label><input class="form-input" id="qlKeyId" placeholder="e.g. app_6a2e3b044862d1b9713a62a1"></div>
+        <div class="form-group"><label class="form-label">Sunco Secret Key</label><input class="form-input" id="qlSecret" type="password" placeholder="Secret Key (as shown in Admin Center)"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Widget Key</label>
+        <input class="form-input" id="qlWidgetKey" placeholder="e.g. 8b5a738b-fb7a-42c5-95a6-1cb26e82900a">
+        <div class="form-hint">Found in Admin Center → Channels → Messaging → Web Widget → Installation</div>
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-primary" id="btnQlSaveConfig" onclick="qlSaveConfig()">Save Configuration</button>
+      </div>
+      <div class="form-hint" style="margin-top:8px">Credentials are stored server-side only and never saved in the browser.</div>
+      <div class="status-box" id="qlConfigStatus"></div>
+    </div>
+  </div>
+
+  <!-- Step 2: Login form — shown after config is saved -->
+  <div id="qlLogin" class="card" style="display:none">
+    <div class="card-header">🔐 Login</div>
+    <div class="card-body">
+      <div style="background:var(--success-light);border:1px solid #b2dfca;border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:#0a5c3a;margin-bottom:16px">
+        ✓ Configuration saved. Enter a Zendesk user account to authenticate.
+      </div>
+      <div class="form-group"><label class="form-label">Username (Email)</label><input class="form-input" id="qlEmail" placeholder="user@company.com"></div>
+      <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="qlPassword" type="password" placeholder="Zendesk user password" onkeydown="if(event.key==='Enter')quickLogin()"></div>
+      <div class="btn-group">
+        <button class="btn btn-primary btn-block" id="btnQlLogin" onclick="quickLogin()">Login</button>
+      </div>
+      <div class="status-box" id="qlStatus"></div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn btn-outline" onclick="editQlConfig()" style="font-size:11px;padding:4px 10px">⚙️ Edit Configuration</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Success card — shown after successful authentication -->
+  <div id="qlSuccess" class="card" style="display:none">
+    <div class="card-header" style="color:var(--success)">✓ Authenticated</div>
+    <div class="card-body">
+      <p style="font-size:13px;color:var(--text2);margin-bottom:12px">You are logged in and the messaging widget is active. You can now chat as this user.</p>
+      <div id="qlUserInfo" style="font-size:13px;margin-bottom:16px;padding:12px;background:var(--success-light);border-radius:var(--radius-sm);border:1px solid #b2dfca"></div>
+      <div class="btn-group">
+        <button class="btn btn-outline" onclick="quickLogout()" style="color:var(--error);border-color:#f0b8bc">Logout & Close Widget</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PAGE: API Logs ==================== -->
+<!-- Shows a summary of API call activity. Full log details are only available
+     via the ⬇ Download button after authentication. This prevents sensitive
+     request/response data from being displayed in the browser. -->
+<div class="page" id="pageLogs">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <h2 style="font-size:18px;font-weight:700;color:var(--text)">API Logs</h2>
+    <button class="btn btn-outline" id="btnDownloadLogs" style="font-size:12px;padding:6px 12px;display:none" onclick="downloadLogs()">⬇ Download</button>
+  </div>
+  <div style="font-size:12px;color:var(--text3);margin-bottom:12px" id="logCount">0 entries</div>
+  <div id="logList"></div>
+  <div id="logInfo" style="margin-top:16px">
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <span style="font-size:22px">🔒</span>
+        <div style="font-size:15px;font-weight:600;color:var(--text)">API Logs — Summary View</div>
+      </div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.7">
+        <p style="margin:0 0 10px 0">This page tracks all server-side API calls made during your session — including Zendesk, Sunshine Conversations, and JWT operations. <strong>Full log details (endpoints, request/response bodies) are not displayed here for security.</strong></p>
+        <p style="margin:0 0 10px 0">To access the complete logs:</p>
+        <ol style="margin:0 0 10px 0;padding-left:20px">
+          <li><strong>Log in</strong> via the Configuration page or User Login page</li>
+          <li>Click the <strong>⬇ Download</strong> button above to export all logs as a text file</li>
+        </ol>
+        <p style="margin:0 0 10px 0">The downloaded file includes:</p>
+        <ul style="margin:0 0 10px 0;padding-left:20px">
+          <li>Timestamp, HTTP method, and action for each call</li>
+          <li>Status codes and result labels</li>
+          <li>Full endpoint URLs</li>
+          <li>Request and response bodies (sensitive fields redacted)</li>
+        </ul>
+        <p style="margin:0;color:var(--text3);font-size:12px">The summary count updates automatically as you make API calls. Use <strong>⬇ Download</strong> to export the full log file.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PAGE: Documentation ==================== -->
+<div class="page" id="pageDocs">
+
+  <div class="doc-section">
+    <h3>📖 Overview</h3>
+    <p>This application lets you create Zendesk end-user accounts and authenticate them into the Zendesk messaging widget using JWT (JSON Web Token) authentication. It acts as a <strong>backend proxy</strong> — all Zendesk and Sunshine Conversations API calls are made server-side, keeping your credentials and JWT signing secret out of the browser.</p>
+  </div>
+
+  <div class="doc-section">
+    <h3>🔑 Credential Requirements</h3>
+    <p>You need two sets of credentials from your Zendesk account:</p>
+
+    <h4>Zendesk Admin API Credentials</h4>
+    <p>Used to create end-user accounts and set passwords via the Zendesk REST API (<code>/api/v2/</code>).</p>
+    <table class="doc-table">
+      <tr><th>Field</th><th>Description</th></tr>
+      <tr><td><strong>Subdomain</strong></td><td>Your Zendesk account subdomain (e.g., <code>z3nbwilliams</code> from <code>z3nbwilliams.zendesk.com</code>)</td></tr>
+      <tr><td><strong>Admin Email</strong></td><td>The email address of a Zendesk admin account</td></tr>
+      <tr><td><strong>API Token</strong></td><td>A Zendesk API token generated in Admin Center → Apps → Zendesk API → API Tokens</td></tr>
+    </table>
+    <p>👉 <a class="doc-link" href="https://support.zendesk.com/hc/en-us/articles/4408889192858-Managing-API-tokens-in-the-Admin-Center" target="_blank">Zendesk: Managing API tokens in the Admin Center</a></p>
+
+    <h4>Sunshine Conversations (Sunco) Credentials</h4>
+    <p>Used to create/update Sunco user profiles and sign JWT tokens for messenger authentication. Generated from <a class="doc-link" href="https://support.zendesk.com/hc/en-us/articles/4576088682266-Using-the-Conversations-API-keys" target="_blank">Conversations API keys</a>.</p>
+    <table class="doc-table">
+      <tr><th>Field</th><th>Description</th></tr>
+      <tr><td><strong>App ID</strong></td><td>The App ID from the Conversations API key token</td></tr>
+      <tr><td><strong>Key ID</strong></td><td>The Key ID from the Conversations API key token (format: <code>app_…</code>)</td></tr>
+      <tr><td><strong>Secret Key</strong></td><td>The Secret Key from the same Conversations API key token (used as a raw string for HMAC-SHA256 signing — do NOT base64-decode it)</td></tr>
+      <tr><td><strong>Widget Key</strong></td><td>From Admin Center → Channels → Messaging → Web Widget → Installation</td></tr>
+    </table>
+    <p>👉 <a class="doc-link" href="https://support.zendesk.com/hc/en-us/articles/4576088682266-Using-the-Conversations-API-keys" target="_blank">Zendesk: Using the Conversations API keys</a></p>
+
+    <div class="doc-callout warn">
+      ⚠️ <strong>Secret Key note:</strong> The JWT Secret Key is used <em>exactly as shown</em> in the Admin Center — as a raw UTF-8 string for HMAC-SHA256 signing. Do <strong>not</strong> base64-decode it before signing. The JWT <code>scope</code> must be <code>"user"</code> (not <code>"end_user"</code>).
+    </div>
+  </div>
+
+  <div class="doc-section">
+    <h3>🛡️ Configuration Page</h3>
+    <p>The Configuration page has three steps after saving credentials:</p>
+
+    <div class="doc-step">
+      <div class="doc-step-num">1</div>
+      <div class="doc-step-text"><strong>Create Zendesk End-User</strong> — Enter a full name and email address. The external ID is automatically generated from the email. The app calls <code>POST /api/v2/users</code> with <code>role: 'end-user'</code>, <code>verified: true</code>, and <code>skip_verify_email: true</code> so the user can immediately authenticate without email verification. After creation, the fields are locked to prevent accidental changes.</div>
+    </div>
+    <div class="doc-step">
+      <div class="doc-step-num">2</div>
+      <div class="doc-step-text"><strong>Set Password</strong> — Sets a password for the newly created user via <code>POST /api/v2/users/:id/password</code>. The password is required to authenticate the user.</div>
+    </div>
+    <div class="doc-step">
+      <div class="doc-step-num">3</div>
+      <div class="doc-step-text"><strong>Login & Open Widget</strong> — Creates a Sunco user profile, generates a JWT, and authenticates into the messaging widget. The widget opens automatically using the Widget Key configured in step 1.</div>
+    </div>
+
+    <div class="doc-callout">
+      💡 Credentials entered on this page are stored in the server's <strong>in-memory session store</strong> (keyed by a random <code>sessionId</code>). They are <strong>never saved in the browser</strong>. The <code>sessionId</code> is the only thing stored in <code>sessionStorage</code>. Sessions expire after 15 minutes of inactivity and are lost when the server restarts.
+    </div>
+  </div>
+
+  <div class="doc-section">
+    <h3>⚡ User Login Page</h3>
+    <p>User Login authenticates an existing Zendesk end-user into the messaging widget in one step — just email and password. It uses <strong>environment variables</strong> set on the hosting platform (or credentials saved on the Configuration page), so credentials survive restarts and redeploys securely.</p>
+
+    <h4>How it works</h4>
+    <div class="doc-step">
+      <div class="doc-step-num">1</div>
+      <div class="doc-step-text">You enter your <strong>email and password</strong>. The app sends them to <code>POST /api/quick-login</code>.</div>
+    </div>
+    <div class="doc-step">
+      <div class="doc-step-num">2</div>
+      <div class="doc-step-text">The server looks up the Zendesk user by email via <code>GET /api/v2/users/search.json?query=email</code> using admin API credentials from environment variables.</div>
+    </div>
+    <div class="doc-step">
+      <div class="doc-step-num">3</div>
+      <div class="doc-step-text">The server generates a JWT using your Sunco Key ID and Secret Key. The JWT contains <code>scope: "user"</code>, <code>external_id</code>, <code>name</code>, <code>email</code>, and <code>email_verified: true</code>, signed with HMAC-SHA256.</div>
+    </div>
+    <div class="doc-step">
+      <div class="doc-step-num">4</div>
+      <div class="doc-step-text">The frontend stores the JWT, user info, and widget key in <code>sessionStorage</code>, then redirects to <code>/?wk=WIDGET_KEY</code>.</div>
+    </div>
+    <div class="doc-step">
+      <div class="doc-step-num">5</div>
+      <div class="doc-step-text">The server intercepts the request and <strong>injects the Zendesk snippet script</strong> into the HTML <code>&lt;head&gt;</code>. This is critical — loading <code>snippet.js</code> dynamically causes an InboundFilters crash.</div>
+    </div>
+    <div class="doc-step">
+      <div class="doc-step-num">6</div>
+      <div class="doc-step-text">On page load, the auto-login code detects the <code>?wk=</code> parameter, retrieves auth data from <code>sessionStorage</code>, and calls <code>zE('messenger', 'loginUser', jwtCallback, loginCallback)</code> to authenticate.</div>
+    </div>
+    <div class="doc-step">
+      <div class="doc-step-num">7</div>
+      <div class="doc-step-text">On success, the messaging widget opens and the user can chat. On failure, an error message is displayed.</div>
+    </div>
+
+    <div class="doc-callout">
+      💡 <strong>First time?</strong> If environment variables are not configured, you'll see a warning on the User Login page. Either set <code>ZENDESK_SUBDOMAIN</code>, <code>ZENDESK_ADMIN_EMAIL</code>, <code>ZENDESK_API_TOKEN</code>, <code>SUNCO_APP_ID</code>, <code>SUNCO_KEY_ID</code>, <code>SUNCO_SECRET</code>, and <code>ZENDESK_WIDGET_KEY</code> on the hosting platform, or save credentials on the Configuration page.
+    </div>
+  </div>
+
+  <div class="doc-section">
+    <h3>📋 API Logs Page</h3>
+    <p>The API Logs page displays every Zendesk/Sunco API call made by the server, including the HTTP method, endpoint, status code, and expandable request/response bodies. Logs are <strong>auto-refreshed</strong> after every API call via a fetch interceptor — you don't need to click Refresh manually.</p>
+    <p>Sensitive fields (<code>password</code>, <code>apiToken</code>, <code>secret</code>, <code>authorization</code>) are automatically redacted to <code>••••••••</code> in the logs.</p>
+  </div>
+
+  <div class="doc-section">
+    <h3>🏗️ How the Code Works</h3>
+
+    <h4>Architecture</h4>
+    <p>The app consists of two files:</p>
+    <ul>
+      <li><strong><code>server.js</code></strong> — Express backend that proxies all Zendesk/Sunco API calls (avoiding CORS), signs JWTs, stores credentials server-side, and injects the Zendesk snippet into the HTML.</li>
+      <li><strong><code>index.html</code></strong> — Single-page app with four pages (Configuration, User Login, API Logs, Docs). All state management happens client-side, but credentials are never stored in the browser.</li>
+    </ul>
+
+    <h4>Two Credential Storage Mechanisms</h4>
+    <table class="doc-table">
+      <tr><th>Mechanism</th><th>Used by</th><th>Storage</th><th>Persists?</th></tr>
+      <tr><td><strong>In-memory session</strong></td><td>Configuration page</td><td><code>credentialsStore</code> object in server RAM, keyed by random <code>sessionId</code></td><td>No — expires after 15 min idle, lost on server restart</td></tr>
+      <tr><td><strong>Environment variables</strong></td><td>User Login page</td><td>Server <code>process.env</code> (set on hosting platform)</td><td>Yes — survives restarts and redeploys</td></tr>
+      <tr><td><strong>In-memory session</strong> (fallback)</td><td>User Login page</td><td><code>credentialsStore</code> keyed by <code>sessionId</code></td><td>No — same as Configuration page session</td></tr>
+    </table>
+
+    <h4>JWT Generation</h4>
+    <p>The JWT is generated server-side in the <code>generateJWT()</code> function using Node.js's built-in <code>crypto</code> module. No external JWT library is used — the signing is done manually with <code>crypto.createHmac('sha256', secret)</code>:</p>
+    <pre>Header:  { alg: "HS256", typ: "JWT", kid: KEY_ID }
+Payload: { scope: "user", external_id: "...", name: "...", email: "...",
+           email_verified: true, iat: NOW, exp: NOW + 3600 }
+Sign:    HMAC-SHA256(secret_as_raw_string, header_b64url + "." + payload_b64url)</pre>
+    <p>The <code>kid</code> (Key ID) in the header tells Zendesk which API key was used to sign the token. The <code>scope: "user"</code> claim is required for messenger authentication — using <code>"end_user"</code> will cause a login failure.</p>
+
+    <h4>Widget Snippet Injection</h4>
+    <p>The Zendesk messaging widget (<code>snippet.js</code>) <strong>cannot</strong> be loaded dynamically via <code>document.createElement('script')</code> after page load — this causes an <code>InboundFilters</code> crash in the SDK's module loader. Instead, when User Login succeeds, the page redirects to <code>/?wk=WIDGET_KEY&sd=SUBDOMAIN</code>. The server intercepts this request, reads <code>index.html</code>, injects the <code>&lt;script id="ze-snippet"&gt;</code> tag into <code>&lt;head&gt;</code>, and serves the modified HTML. This way the snippet is part of the initial HTML parse, exactly as Zendesk intends.</p>
+
+    <h4>Fetch Interceptor</h4>
+    <p>The frontend replaces <code>window.fetch</code> with an interceptor that schedules an API log refresh after every non-<code>/api/logs</code> call. This ensures the API Logs page stays current without manual refresh. The original <code>fetch</code> is preserved as <code>_rawFetch</code> for internal use (so log refreshes don't trigger recursive refreshes).</p>
+
+    <h4>API Endpoints</h4>
+    <table class="doc-table">
+      <tr><th>Method</th><th>Endpoint</th><th>Description</th></tr>
+      <tr><td><code>GET /</code></td><td colspan="2">Serve SPA (with snippet injection if <code>?wk=</code> param present)</td></tr>
+      <tr><td><code>POST /api/session</code></td><td colspan="2">Store credentials in memory, return sessionId</td></tr>
+      <tr><td><code>GET /api/session/:id</code></td><td colspan="2">Get session data (subdomain, widgetKey)</td></tr>
+      <tr><td><code>DELETE /api/session/:id</code></td><td colspan="2">Clear a session's credentials</td></tr>
+      <tr><td><code>DELETE /api/reset/:id</code></td><td colspan="2">Full reset: clear session + all logs</td></tr>
+      <tr><td><code>GET /api/config</code></td><td colspan="2">Check if persisted config exists (returns non-sensitive fields)</td></tr>
+      <tr><td><code>POST /api/config</code></td><td colspan="2">Validate that environment variables are configured</td></tr>
+      <tr><td><code>DELETE /api/config</code></td><td colspan="2">No-op (env vars cannot be deleted via API)</td></tr>
+      <tr><td><code>POST /api/zendesk-users</code></td><td colspan="2">Create a Zendesk end-user</td></tr>
+      <tr><td><code>POST /api/zendesk-users/:id/password</code></td><td colspan="2">Set a user's password</td></tr>
+      <tr><td><code>POST /api/sunco-users</code></td><td colspan="2">Create/update a Sunco user (auto-retries as PATCH on 409)</td></tr>
+      <tr><td><code>POST /api/generate-jwt</code></td><td colspan="2">Generate a JWT (session-based)</td></tr>
+      <tr><td><code>POST /api/quick-login</code></td><td colspan="2">Look up user by email, generate JWT (persisted config)</td></tr>
+      <tr><td><code>GET /api/logs</code></td><td colspan="2">Get all logged API calls</td></tr>
+      <tr><td><code>DELETE /api/logs</code></td><td colspan="2">Clear all logs</td></tr>
+      <tr><td><code>GET /api/verify-creds</code></td><td colspan="2">Test Sunco API credentials</td></tr>
+      <tr><td><code>GET /api/debug-jwt</code></td><td colspan="2">Decode the last generated JWT (debug)</td></tr>
+    </table>
+  </div>
+
+  <div class="doc-section">
+    <h3>🔒 Security Notes</h3>
+    <ul>
+      <li><strong>Credentials are stored in environment variables</strong> — never in config.json or client-side storage. Set <code>ZENDESK_*</code> and <code>SUNCO_*</code> env vars on your hosting platform.</li>
+      <li><strong>JWT signing is server-side</strong> — the Secret Key is never sent to the browser. Only the signed JWT token is returned.</li>
+      <li><strong>API logs require authentication</strong> — all <code>/api/</code> endpoints require a valid session or API key header.</li>
+      <li><strong>API logs redact sensitive fields</strong> — passwords, API tokens, secrets, and authorization headers are replaced with <code>••••••••</code>.</li>
+      <li><strong>Sessions expire after 15 minutes of inactivity</strong> — in-memory credential store has a TTL to limit exposure.</li>
+      <li><strong>JWTs expire after 15 minutes</strong> — reduced from 1 hour. A jti (JWT ID) blocklist supports revocation.</li>
+      <li><strong>Rate limiting</strong> — authentication and user-creation endpoints are rate-limited (5–20 req/15min per IP).</li>
+      <li><strong>Security headers</strong> — helmet middleware sets CSP, X-Frame-Options, X-Content-Type-Options, and more.</li>
+      <li><strong>Input validation</strong> — email, name, external ID, and password fields are validated and sanitized before use.</li>
+      <li><strong>Production error handling</strong> — stack traces are never leaked to clients in production mode.</li>
+    </ul>
+  </div>
+
+  <div class="doc-section">
+    <h3>🔗 Helpful Links</h3>
+    <ul>
+      <li><a class="doc-link" href="https://support.zendesk.com/hc/en-us/articles/4408889192858-Managing-API-tokens-in-the-Admin-Center" target="_blank">Managing API tokens in the Admin Center</a> — creating Zendesk API tokens</li>
+      <li><a class="doc-link" href="https://help.zendesk.com/hc/en-us/articles/4408795695258-Managing-Conversation-API-keys" target="_blank">Managing Conversation API keys</a> — creating Sunco Key ID and Secret Key</li>
+      <li><a class="doc-link" href="https://help.zendesk.com/hc/en-us/articles/4408835394074-Adding-the-Web-Widget-to-your-website" target="_blank">Adding the Web Widget to your website</a> — finding your Widget Key</li>
+      <li><a class="doc-link" href="https://support.zendesk.com/hc/en-us/articles/4576088682266-Using-the-Conversations-API-keys" target="_blank">Using the Conversations API keys</a> — generating JWT Secret, App ID, and Key ID</li>
+      <li><a class="doc-link" href="https://developer.zendesk.com/api-reference/ticketing/users/users/" target="_blank">Zendesk Users API</a> — creating and managing Zendesk users</li>
+    </ul>
+  </div>
+
+</div>
+
+<script>
+// ============================================================
+// APPLICATION STATE
+// ============================================================
+// The frontend stores minimal state — no credentials are kept in the browser.
+// The sessionId is the only reference to server-side credential storage
+// (used by the Configuration page). User Login uses persisted config
+// on the server and doesn't need a sessionId at all.
+var sessionId = sessionStorage.getItem('zd_session_id') || null;
+
+// Stores the Zendesk user ID and email after user creation in Configuration
+// step 1, so step 2 (set password) knows which user to target.
+var createdUserId = null;
+var createdEmail = null;
+
+// ============================================================
+// NAVIGATION — switches between pages (tabs)
+// ============================================================
+// Hides all .page elements, shows the target page, and updates the
+// active tab style. Also triggers page-specific initialization:
+// - 'logs' page → refreshes the API log entries
+// - 'quicklogin' page → checks for persisted config on the server
+function switchPage(page) {
+  document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
+  var pageId = 'page' + page.charAt(0).toUpperCase() + page.slice(1);
+  var pageEl = document.getElementById(pageId);
+  if (pageEl) pageEl.classList.add('active');
+  document.querySelectorAll('.nav-tab').forEach(function(t) { t.classList.remove('active'); });
+  var tab = document.querySelector('.nav-tab[data-page="' + page + '"]');
+  if (tab) tab.classList.add('active');
+  if (page === 'logs') refreshLogs();
+  if (page === 'quicklogin') updateQlPage();
+}
+
+// ============================================================
+// SESSION INDICATOR — shows green dot when session is active
+// ============================================================
+// The session indicator in the nav bar reflects whether credentials
+// are stored server-side. Green = active session, gray = no session.
+function updateSessionDot() {
+  var dot = document.getElementById('sessionDot');
+  var label = document.getElementById('sessionLabel');
+  dot.className = 'session-dot' + (sessionId ? ' active' : '');
+  label.textContent = sessionId ? 'Session active' : 'No session';
+}
+
+// ============================================================
+// AUTO-GENERATE EXTERNAL ID — from email input
+// ============================================================
+// When the user types in the email field on the Configuration page,
+// this automatically populates the External ID field with the email's
+// local part (before @), lowercased and with special chars replaced by _.
+// This provides a stable, unique identifier for the Sunco user profile.
+// The user can override the auto-generated value if needed.
+function autoGenerateExternalId() {
+  var email = document.getElementById('userEmail').value.trim();
+  var extIdField = document.getElementById('userExternalId');
+  if (email && email.indexOf('@') > 0) {
+    var local = email.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    extIdField.value = local;
+  }
+}
+
+// ============================================================
+// CONFIGURATION PAGE — Save credentials to server-side session
+// ============================================================
+// The Configuration page collects Zendesk admin credentials and Sunco
+// API credentials. These are sent to POST /api/session which stores them
+// in memory keyed by a random sessionId. Only the sessionId is returned
+// to the browser — the actual credentials never touch client-side storage.
+//
+// After saving, the config form is hidden and the user creation steps
+// (Step 1: Create User, Step 2: Set Password) become visible.
+function saveConfig() {
+  var fields = ['cfgSubdomain','cfgAdminEmail','cfgApiToken','cfgAppId','cfgKeyId','cfgSecret','cfgWidgetKey'];
+  var map = {cfgSubdomain:'subdomain',cfgAdminEmail:'adminEmail',cfgApiToken:'apiToken',cfgAppId:'appId',cfgKeyId:'keyId',cfgSecret:'secret',cfgWidgetKey:'widgetKey'};
+  var payload = {};
+  for (var i = 0; i < fields.length; i++) {
+    var el = document.getElementById(fields[i]);
+    payload[map[fields[i]]] = el.value.trim();
+  }
+  for (var k in payload) {
+    if (k !== 'widgetKey' && !payload[k]) { showStatus('configStatus', 'error', 'All fields except Widget Key are required.'); return; }
+  }
+
+  _rawFetch('/api/session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.sessionId) {
+      sessionId = data.sessionId;
+      sessionStorage.setItem('zd_session_id', sessionId);
+      updateSessionDot();
+      // Clear credential fields — never stored locally
+      fields.forEach(function(id) { document.getElementById(id).value = ''; });
+      document.getElementById('configSection').style.display = 'none';
+      document.getElementById('configLock').style.display = '';
+      showStatus('configStatus', 'success', 'Configuration saved securely. Credentials are stored server-side only and not accessible from the browser.');
+      document.getElementById('stepsSection').style.display = '';
+    } else {
+      showStatus('configStatus', 'error', data.error || 'Failed to save configuration.');
+    }
+  }).catch(function(e) { showStatus('configStatus', 'error', 'Network error: ' + e.message); });
+}
+
+// ============================================================
+// STEP NAVIGATION — controls the 2-step wizard on Configuration page
+// ============================================================
+// Step 1: Create Zendesk End-User
+// Step 2: Set Password (only shown after step 1 succeeds)
+// The step dots and connecting lines update to reflect progress.
+function showStep(n) {
+  for (var i = 1; i <= 3; i++) {
+    var el = document.getElementById('step' + i);
+    if (el) el.style.display = (i <= n) ? '' : 'none';
+    var dot = document.getElementById('stepDot' + i);
+    var line = document.getElementById('stepLine' + (i - 1));
+    dot.className = 'step-dot' + (i < n ? ' done' : (i === n ? ' active' : ''));
+    if (line) line.className = 'step-line' + (i < n ? ' done' : '');
+  }
+}
+
+// ============================================================
+// STEP 1: CREATE ZENDSK USER
+// ============================================================
+// Sends the user's name, email, and auto-generated externalId to the
+// server endpoint POST /api/zendesk-users, which creates a Zendesk
+// end-user with role='end-user', verified=true, and skip_verify_email=true.
+// On success, stores the created user's ID for step 2 (set password).
+function createZendeskUser() {
+  var name = document.getElementById('userName').value.trim();
+  var email = document.getElementById('userEmail').value.trim();
+  var externalId = document.getElementById('userExternalId').value.trim();
+  if (!name || !email || !externalId) { showStatus('step1Status', 'error', 'All fields are required.'); return; }
+
+  _rawFetch('/api/zendesk-users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: sessionId, name: name, email: email, externalId: externalId })
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.user) {
+      createdUserId = data.user.id;
+      createdEmail = data.user.email || email;
+      showStatus('step1Status', 'success', 'User created! ID: ' + data.user.id);
+      // Lock the fields — user cannot modify created user info
+      document.getElementById('userName').disabled = true;
+      document.getElementById('userEmail').disabled = true;
+      document.getElementById('userExternalId').disabled = true;
+      document.getElementById('btnCreateUser').disabled = true;
+      document.getElementById('btnCreateUser').textContent = 'User Created ✓';
+      // Save state for page refresh recovery
+      sessionStorage.setItem('zd_config_state', JSON.stringify({
+        userName: name,
+        userEmail: createdEmail,
+        userExternalId: externalId,
+        createdUserId: createdUserId,
+        step: 1
+      }));
+      showStep(2);
+    } else {
+      showStatus('step1Status', 'error', data.error || 'Failed to create user. ' + (data.details ? JSON.stringify(data.details) : ''));
+    }
+  }).catch(function(e) { showStatus('step1Status', 'error', 'Network error: ' + e.message); });
+}
+
+// ============================================================
+// STEP 2: SET PASSWORD
+// ============================================================
+// Sets a password for the newly created Zendesk end-user. This is
+// required for the User Login flow — the user needs a password to
+// authenticate. Calls POST /api/zendesk-users/:id/password with the
+// user's numeric ID (from step 1) and the chosen password.
+// Minimum password length is 5 characters per Zendesk requirements.
+function setPassword() {
+  var password = document.getElementById('userPassword').value;
+  if (!password || password.length < 5) { showStatus('step2Status', 'error', 'Password must be at least 5 characters.'); return; }
+  if (!createdUserId) { showStatus('step2Status', 'error', 'Create a user first.'); return; }
+
+  showStatus('step2Status', 'info', 'Setting password…');
+
+  _rawFetch('/api/zendesk-users/' + createdUserId + '/password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: sessionId, password: password })
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.success) {
+      showStatus('step2Status', 'success', 'Password set! Proceed to login.');
+      // Lock the password field
+      document.getElementById('userPassword').disabled = true;
+      document.getElementById('btnSetPassword').disabled = true;
+      document.getElementById('btnSetPassword').textContent = 'Password Set ✓';
+      // Update saved state for page refresh recovery
+      var prevState = {};
+      try { prevState = JSON.parse(sessionStorage.getItem('zd_config_state') || '{}'); } catch(e) {}
+      sessionStorage.setItem('zd_config_state', JSON.stringify({
+        userName: prevState.userName || '',
+        userEmail: prevState.userEmail || createdEmail || '',
+        userExternalId: prevState.userExternalId || '',
+        createdUserId: prevState.createdUserId || createdUserId,
+        step: 2
+      }));
+      showStep(3);
+    } else {
+      showStatus('step2Status', 'error', data.error || 'Failed to set password.');
+    }
+  }).catch(function(e) { showStatus('step2Status', 'error', 'Network error: ' + e.message); });
+}
+
+// ============================================================
+// STEP 3: LOGIN & OPEN WIDGET (Configuration page)
+// ============================================================
+// After creating a user and setting a password, this step authenticates
+// the user via the messaging widget using JWT. The flow:
+// 1. Create/update Sunco user profile (POST /api/sunco-users)
+// 2. Generate a JWT (POST /api/generate-jwt)
+// 3. Redirect to /?wk=WIDGET_KEY so the server injects the Zendesk snippet
+// 4. On page reload, the auto-login IIFE authenticates via zE('messenger', 'loginUser')
+function configLogin() {
+  if (!createdUserId || !createdEmail) {
+    showStatus('step3Status', 'error', 'Create a user and set a password first.');
+    return;
+  }
+
+  var btn = document.getElementById('btnConfigLogin');
+  btn.disabled = true;
+  showStatus('step3Status', 'info', 'Preparing authentication…');
+
+  // Step 1: Get widget key from session
+  _rawFetch('/api/session/' + sessionId + '/widget-key').then(function(r) { return r.json(); }).then(function(wkData) {
+    var widgetKey = wkData.widgetKey;
+    if (!widgetKey) {
+      btn.disabled = false;
+      showStatus('step3Status', 'error', 'No Widget Key configured. Go back and add a Widget Key to your configuration.');
+      return;
+    }
+
+    // Step 2: Create Sunco user
+    var userName = document.getElementById('userName').value.trim();
+    var userExternalId = document.getElementById('userExternalId').value.trim();
+    showStatus('step3Status', 'info', 'Creating Sunco user profile…');
+
+    _rawFetch('/api/sunco-users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: sessionId, externalId: userExternalId, name: userName, email: createdEmail })
+    }).then(function(r) { return r.json(); }).then(function(suncoData) {
+      var suncoUserId = suncoData.user ? suncoData.user.id : null;
+
+      // Note: We don't call a sync endpoint — there is no valid Sunco sync API.
+      // Creating the Sunco user with the matching externalId is sufficient for
+      // JWT authentication to link the Sunco profile to the Zendesk user.
+
+      // Step 3: Generate JWT
+      showStatus('step3Status', 'info', 'Generating JWT token…');
+      _rawFetch('/api/generate-jwt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: sessionId, externalId: userExternalId, name: userName, email: createdEmail })
+      }).then(function(r) { return r.json(); }).then(function(jwtData) {
+        if (!jwtData.jwt) {
+          btn.disabled = false;
+          showStatus('step3Status', 'error', jwtData.error || 'Failed to generate JWT.');
+          return;
+        }
+
+        // Store auth data in sessionStorage and redirect
+        sessionStorage.setItem('zd_jwt', jwtData.jwt);
+        sessionStorage.setItem('zd_user', JSON.stringify({ name: userName, email: createdEmail, externalId: userExternalId }));
+        sessionStorage.setItem('zd_widget_key', widgetKey);
+        sessionStorage.setItem('zd_session_id', sessionId);
+        sessionStorage.setItem('zd_from_config', '1');
+        // Store config page state so it can be restored after redirect
+        sessionStorage.setItem('zd_config_state', JSON.stringify({
+          userName: userName,
+          userEmail: createdEmail,
+          userExternalId: userExternalId,
+          createdUserId: createdUserId,
+          step: 3,
+          authed: true
+        }));
+
+        var redirectUrl = '/?wk=' + encodeURIComponent(widgetKey);
+        _rawFetch('/api/session/' + sessionId).then(function(r2) { return r2.json(); }).then(function(sData) {
+          if (sData.subdomain) redirectUrl += '&sd=' + encodeURIComponent(sData.subdomain);
+          window.location.href = redirectUrl;
+        }).catch(function() {
+          window.location.href = redirectUrl;
+        });
+      }).catch(function(e) {
+        btn.disabled = false;
+        showStatus('step3Status', 'error', 'Network error: ' + e.message);
+      });
+    }).catch(function(e) {
+      btn.disabled = false;
+      showStatus('step3Status', 'error', 'Network error: ' + e.message);
+    });
+  }).catch(function(e) {
+    btn.disabled = false;
+    showStatus('step3Status', 'error', 'Network error: ' + e.message);
+  });
+}
+
+// configLogout — Logs out from the Zendesk widget and resets the Configuration
+// page's login state back to the login button.
+function configLogout() {
+  try { zE('messenger', 'logoutUser'); } catch(e) {}
+  try { zE('messenger', 'close'); } catch(e) {}
+  _isAuthenticated = false;
+  updateAuthState();
+  document.getElementById('configAuthSuccess').style.display = 'none';
+  document.getElementById('btnConfigLogin').style.display = '';
+  document.getElementById('btnConfigLogin').disabled = false;
+  showStatus('step3Status', 'info', 'Logged out. Click Login & Open Widget to reconnect.');
+}
+
+// ============================================================
+// USER LOGIN PAGE — Self-contained: config + login on one page
+// ============================================================
+// The User Login page is a self-contained flow that doesn't require a
+// server-side session (when env vars are configured). It uses environment
+// variables as the primary config source, but also falls back to session
+// credentials from the Configuration page.
+//
+// The page has 3 states:
+// 1. Config form (qlConfig) — shown if no persisted config exists yet
+// 2. Login form (qlLogin) — shown after config is saved
+// 3. Success card (qlSuccess) — shown after successful authentication
+//
+// The flow:
+// 1. User enters config (or it's pre-filled from persisted config)
+// 2. User enters email + password
+// 3. POST /api/quick-login → server looks up user, generates JWT
+// 4. Frontend stores auth data in sessionStorage and redirects to /?wk=KEY
+// 5. On page load with ?wk= param, auto-authenticates via zE('messenger', 'loginUser')
+// ============================================================
+
+// initWidget — Initialize the Zendesk messaging widget after page reload.
+// The snippet was injected server-side into <head>, so zE should be available.
+// If not yet loaded, polls every 500ms for up to 20 seconds.
+function initWidget(widgetKey, jwt, user) {
+  if (typeof zE === 'function') {
+    authenticateUser(jwt, user);
+  } else {
+    // Snippet still loading — poll for it
+    showStatus('qlStatus', 'info', 'Waiting for widget SDK to load…');
+    var attempts = 0;
+    var poll = setInterval(function() {
+      attempts++;
+      if (typeof zE === 'function') {
+        clearInterval(poll);
+        authenticateUser(jwt, user);
+      } else if (attempts >= 40) {
+        clearInterval(poll);
+        showStatus('qlStatus', 'error', 'Zendesk widget SDK did not load within 20 seconds. Check your Widget Key and network connection.');
+      }
+    }, 500);
+  }
+}
+
+// authenticateUser — Authenticate the user via the Zendesk messaging widget SDK.
+// Uses the zE('messenger', 'loginUser', jwtCallback, loginCallback) API.
+// - jwtCallback: called each time the widget needs a JWT — provides the pre-generated token
+// - loginCallback: receives null on success, or LoginFailedError on failure
+// On success, opens the messenger widget. On failure, shows the error message.
+function authenticateUser(jwt, user) {
+  showStatus('qlStatus', 'info', 'Authenticating user in widget…');
+
+  // Debug: decode and log JWT payload (no secret leak)
+  try {
+    var parts = jwt.split('.');
+    var headerObj = JSON.parse(atob(parts[0].replace(/-/g,'+').replace(/_/g,'/')));
+    var payloadObj = JSON.parse(atob(parts[1].replace(/-/g,'+').replace(/_/g,'/')));
+    console.log('[Zendesk] JWT header:', headerObj);
+    console.log('[Zendesk] JWT payload:', payloadObj);
+    console.log('[Zendesk] JWT payload.external_id:', payloadObj.external_id);
+    console.log('[Zendesk] JWT payload.scope:', payloadObj.scope);
+    console.log('[Zendesk] JWT payload.email:', payloadObj.email);
+  } catch(e) { console.warn('[Zendesk] JWT decode failed:', e); }
+
+  zE('messenger', 'loginUser',
+    // jwtCallback — called each time the widget needs a JWT token
+    function(callback) {
+      callback(jwt);
+    },
+    // loginCallback — receives null on success, LoginFailedError on failure
+    function(error) {
+      if (error) {
+        console.error('[Zendesk] loginUser error:', error);
+        console.error('[Zendesk] Error details:', JSON.stringify({ message: error.message, reason: error.reason, stack: error.stack }));
+        showStatus('qlStatus', 'error', 'Authentication failed: ' + error.message + ' (' + error.reason + ')');
+      } else {
+        showStatus('qlStatus', 'success', 'Authenticated! The messaging widget is now active.');
+        _isAuthenticated = true;
+        updateAuthState();
+
+        // Open the messenger
+        try { zE('messenger', 'open'); } catch(e) { console.warn('[Zendesk] open error:', e); }
+      }
+    }
+  );
+}
+
+// ============================================================
+// QUICK LOGIN PAGE STATE & FUNCTIONS
+// ============================================================
+
+// _qlHasConfig — tracks whether the server has a persisted config.
+// Used to determine whether to show the config form or the login form.
+var _qlHasConfig = false;
+
+// _isAuthenticated — tracks whether the user has logged into the widget.
+// Used to show/hide the download logs button.
+var _isAuthenticated = false;
+
+// updateAuthState — shows or hides the download logs button based on auth state.
+function updateAuthState() {
+  var btn = document.getElementById('btnDownloadLogs');
+  if (btn) btn.style.display = _isAuthenticated ? '' : 'none';
+}
+
+// updateQlPage — Checks the server for config (env vars or session) and shows the
+// appropriate User Login sub-view:
+// - If config exists (env vars or session): hides the config form and shows the login form
+// - If no config and no session: shows the config form for the user to fill in
+function updateQlPage() {
+  // If already authenticated, just show success card
+  if (_isAuthenticated) return;
+
+  // Send sessionId so the server can check session credentials too
+  var configUrl = '/api/config';
+  if (sessionId) configUrl += '?sessionId=' + encodeURIComponent(sessionId);
+
+  _rawFetch(configUrl).then(function(r) { return r.json(); }).then(function(data) {
+    _qlHasConfig = data.hasConfig;
+    if (data.hasConfig) {
+      // Config exists (env vars or session) — show login form, hide config form
+      document.getElementById('qlConfig').style.display = 'none';
+      document.getElementById('qlLogin').style.display = '';
+      document.getElementById('qlSuccess').style.display = 'none';
+    } else {
+      // No config — show config form for user to fill in
+      document.getElementById('qlConfig').style.display = '';
+      document.getElementById('qlLogin').style.display = 'none';
+      document.getElementById('qlSuccess').style.display = 'none';
+    }
+  }).catch(function() {
+    document.getElementById('qlConfig').style.display = '';
+    document.getElementById('qlLogin').style.display = 'none';
+  });
+}
+
+// qlSaveConfig — Saves Zendesk configuration from the User Login form.
+// Posts to POST /api/session (same endpoint as Configuration page).
+// On success, clears the form fields and transitions to the login form.
+function qlSaveConfig() {
+  var fields = ['qlSubdomain','qlAdminEmail','qlApiToken','qlAppId','qlKeyId','qlSecret','qlWidgetKey'];
+  var map = {qlSubdomain:'subdomain', qlAdminEmail:'adminEmail', qlApiToken:'apiToken', qlAppId:'appId', qlKeyId:'keyId', qlSecret:'secret', qlWidgetKey:'widgetKey'};
+  var payload = {};
+  for (var i = 0; i < fields.length; i++) {
+    var el = document.getElementById(fields[i]);
+    payload[map[fields[i]]] = el.value.trim();
+  }
+  for (var k in payload) {
+    if (k !== 'widgetKey' && !payload[k]) { showStatus('qlConfigStatus', 'error', 'All fields except Widget Key are required.'); return; }
+  }
+
+  showStatus('qlConfigStatus', 'info', 'Saving configuration…');
+  document.getElementById('btnQlSaveConfig').disabled = true;
+
+  _rawFetch('/api/session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    document.getElementById('btnQlSaveConfig').disabled = false;
+    if (data.sessionId) {
+      sessionId = data.sessionId;
+      sessionStorage.setItem('zd_session_id', sessionId);
+      updateSessionDot();
+      _qlHasConfig = true;
+      // Clear sensitive form fields — never stored locally
+      fields.forEach(function(id) { document.getElementById(id).value = ''; });
+      showStatus('qlConfigStatus', 'success', 'Configuration saved securely. You can now log in.');
+      // Transition to login form
+      document.getElementById('qlConfig').style.display = 'none';
+      document.getElementById('qlLogin').style.display = '';
+      document.getElementById('qlSuccess').style.display = 'none';
+    } else {
+      showStatus('qlConfigStatus', 'error', data.error || 'Failed to save configuration.');
+    }
+  }).catch(function(e) {
+    document.getElementById('btnQlSaveConfig').disabled = false;
+    showStatus('qlConfigStatus', 'error', 'Network error: ' + e.message);
+  });
+}
+
+// editQlConfig — Shows the config form so the user can update their credentials.
+// Pre-fills non-sensitive fields from the server (read-only values from env vars or session).
+function editQlConfig() {
+  document.getElementById('qlLogin').style.display = 'none';
+  document.getElementById('qlSuccess').style.display = 'none';
+  document.getElementById('qlConfig').style.display = '';
+
+  // Pre-fill non-sensitive fields from the server config
+  var configUrl = '/api/config';
+  if (sessionId) configUrl += '?sessionId=' + encodeURIComponent(sessionId);
+  _rawFetch(configUrl).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.hasConfig) {
+      if (data.subdomain) document.getElementById('qlSubdomain').value = data.subdomain;
+      if (data.adminEmail) document.getElementById('qlAdminEmail').value = data.adminEmail;
+      if (data.appId) document.getElementById('qlAppId').value = data.appId;
+      if (data.keyId) document.getElementById('qlKeyId').value = data.keyId;
+      if (data.widgetKey) document.getElementById('qlWidgetKey').value = data.widgetKey;
+      // Sensitive fields (apiToken, secret) are never returned by the server
+    }
+  }).catch(function() {});
+}
+
+// quickLogin — The core User Login flow.
+// 1. Validates email + password
+// 2. POST /api/quick-login → server looks up the Zendesk user by email,
+//    verifies the user has an external_id, and generates a JWT
+//    (uses env config or falls back to session credentials from Configuration page)
+// 3. Stores JWT + user + widgetKey in sessionStorage
+// 4. Redirects to /?wk=WIDGET_KEY so the server can inject the Zendesk
+//    snippet into <head> (avoids the InboundFilters error from dynamic loading)
+// 5. On page reload, the auto-login IIFE detects ?wk= and authenticates
+function quickLogin() {
+  var email = document.getElementById('qlEmail').value.trim();
+  var password = document.getElementById('qlPassword').value;
+  if (!email || !password) { showStatus('qlStatus', 'error', 'Email and password are required.'); return; }
+
+  showStatus('qlStatus', 'info', 'Authenticating…');
+  document.getElementById('btnQlLogin').disabled = true;
+
+  // Include sessionId so server can fall back to session credentials if env vars aren't set
+  var payload = { email: email, password: password };
+  if (sessionId) payload.sessionId = sessionId;
+
+  _rawFetch('/api/quick-login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    document.getElementById('btnQlLogin').disabled = false;
+    if (data.error) {
+      showStatus('qlStatus', 'error', data.error);
+      return;
+    }
+
+    var widgetKey = data.widgetKey;
+    if (!widgetKey) {
+      showStatus('qlStatus', 'error', 'No Widget Key saved. Click ⚙️ Edit Config to add one.');
+      return;
+    }
+
+    // Store auth data in sessionStorage for retrieval after redirect
+    sessionStorage.setItem('zd_jwt', data.jwt);
+    sessionStorage.setItem('zd_user', JSON.stringify(data.user));
+    sessionStorage.setItem('zd_widget_key', widgetKey);
+
+    // Redirect with widget key so server injects the snippet into <head>
+    // This avoids the InboundFilters error that occurs with dynamic snippet loading
+    var redirectUrl = '/?wk=' + encodeURIComponent(widgetKey);
+    if (data.subdomain) redirectUrl += '&sd=' + encodeURIComponent(data.subdomain);
+    window.location.href = redirectUrl;
+  }).catch(function(e) {
+    document.getElementById('btnQlLogin').disabled = false;
+    showStatus('qlStatus', 'error', 'Network error: ' + e.message);
+  });
+}
+
+// quickLogout — Logs the user out of the Zendesk messenger widget and
+// resets the User Login page back to the login form.
+function quickLogout() {
+  try { zE('messenger', 'logoutUser'); } catch(e) {}
+  try { zE('messenger', 'close'); } catch(e) {}
+
+  _isAuthenticated = false;
+  updateAuthState();
+  document.getElementById('qlSuccess').style.display = 'none';
+  document.getElementById('qlLogin').style.display = '';
+  document.getElementById('qlPassword').value = '';
+  showStatus('qlStatus', 'info', 'Logged out. You can log in again.');
+}
+
+// ============================================================
+// FULL RESET — clears all state and returns to Configuration page
+// ============================================================
+// Removes the Zendesk widget (script + DOM elements), deletes the
+// server-side session and persisted config, clears all form fields,
+// resets the User Login page, and navigates to the Configuration page.
+function fullReset() {
+  if (!confirm('This will delete ALL data: credentials, logs, form fields, and the messaging widget. Continue?')) return;
+
+  // Close and remove the Zendesk messaging widget
+  try { zE('messenger', 'logoutUser'); } catch(e) {}
+  try { zE('messenger', 'close'); } catch(e) {}
+
+  // Remove Zendesk script and DOM elements
+  var script = document.getElementById('ze-snippet');
+  if (script) script.remove();
+  var selectors = ['[id^="zendesk"]', '[class*="zendesk"]', 'iframe[src*="zdassets"]', 'iframe[src*="zendesk"]', 'iframe[src*="smooch"]', 'style[data-zendesk]', '#webWidget', '[data-web-widget-root]', '#messenger', '[id*="sunshine"]', '[class*="sunshine"]', '[id*="smooch"]', '[class*="smooch"]', 'div[data-testid*="messenger"]'];
+  selectors.forEach(function(sel) {
+    try { document.querySelectorAll(sel).forEach(function(el) { el.remove(); }); } catch(e) {}
+  });
+  delete window.zE;
+  delete window.zESettings;
+  delete window.zEACQueue;
+  delete window.zEwebpackJsonp;
+
+  if (sessionId) {
+    _rawFetch('/api/reset/' + sessionId, { method: 'DELETE' }).catch(function() {});
+  }
+
+  sessionId = null;
+  sessionStorage.removeItem('zd_session_id');
+  createdUserId = null;
+  createdEmail = null;
+  _lastLogHash = '';
+  _logData = [];
+
+  document.querySelectorAll('.form-input').forEach(function(el) { el.value = ''; });
+  updateSessionDot();
+  document.getElementById('configSection').style.display = '';
+  document.getElementById('configLock').style.display = 'none';
+  document.getElementById('stepsSection').style.display = 'none';
+  showStep(1);
+
+  document.querySelectorAll('.status-box').forEach(function(el) { el.className = 'status-box'; el.textContent = ''; });
+  document.getElementById('logList').innerHTML = '';
+  document.getElementById('logCount').textContent = '0 entries';
+  document.getElementById('navLogBadge').style.display = 'none';
+
+  // Reset User Login state (config is env vars now — no API delete needed)
+  _qlHasConfig = false;
+  document.getElementById('qlConfig').style.display = '';
+  document.getElementById('qlLogin').style.display = 'none';
+  document.getElementById('qlSuccess').style.display = 'none';
+  document.getElementById('qlEmail').value = '';
+  document.getElementById('qlPassword').value = '';
+
+  // Reset Configuration step fields
+  document.getElementById('userName').disabled = false;
+  document.getElementById('userEmail').disabled = false;
+  document.getElementById('userExternalId').disabled = false;
+  document.getElementById('btnCreateUser').disabled = false;
+  document.getElementById('btnCreateUser').textContent = 'Create User';
+  document.getElementById('userPassword').disabled = false;
+  document.getElementById('userPassword').value = '';
+  document.getElementById('btnSetPassword').disabled = false;
+  document.getElementById('btnSetPassword').textContent = 'Set Password';
+  document.getElementById('btnConfigLogin').disabled = false;
+  document.getElementById('configAuthSuccess').style.display = 'none';
+  document.getElementById('btnConfigLogin').style.display = '';
+
+  // Clear config state from sessionStorage
+  sessionStorage.removeItem('zd_config_state');
+  sessionStorage.removeItem('zd_from_config');
+
+  _isAuthenticated = false;
+  updateAuthState();
+
+  switchPage('setup');
+}
+
+// ============================================================
+// STATUS HELPER — shows success/error/info messages in status boxes
+// ============================================================
+// Each card has a .status-box element that's hidden by default.
+// showStatus sets the appropriate CSS class (status-success/status-error/
+// status-info) and displays the message.
+function showStatus(elId, type, msg) {
+  var el = document.getElementById(elId);
+  el.className = 'status-box show status-' + type;
+  el.textContent = msg;
+}
+
+// ============================================================
+// API LOGS — fetches, renders, and manages the server-side API log
+// ============================================================
+// The API Logs page shows all Zendesk/Sunco API calls made by the server,
+// including method, endpoint, status, and expandable request/response details.
+// Sensitive fields (password, apiToken, secret, authorization) are redacted
+// by the server before logging.
+//
+// _rawFetch — the original window.fetch, saved before the interceptor below
+// replaces it. Used for all API calls so they don't trigger recursive log refreshes.
+// _lastLogHash — caches the last rendered log JSON to avoid unnecessary DOM updates.
+// _refreshPending — debounce flag for log refresh after API calls.
+var _rawFetch = window.fetch.bind(window);
+var _lastLogHash = '';
+var _refreshPending = false;
+var _logData = []; // Stores log data for download
+
+// refreshLogs — Fetches all API logs from GET /api/logs and renders them.
+// Called automatically when switching to the Logs page and after each API call.
+function refreshLogs() {
+  var url = '/api/logs';
+  if (sessionId) url += '?sessionId=' + encodeURIComponent(sessionId);
+  _rawFetch(url).then(function(r) { return r.json(); }).then(function(data) {
+    renderLogs(data.logs || []);
+  }).catch(function() {});
+}
+
+// clearLogs — Deletes all logs on the server (DELETE /api/logs) and clears the display.
+function clearLogs() {
+  _rawFetch('/api/logs', { method: 'DELETE' }).then(function() {
+    _lastLogHash = '';
+    _logData = [];
+    renderLogs([]);
+  }).catch(function() {});
+}
+
+// ============================================================
+// DOWNLOAD LOGS — exports all API logs as a text file
+// ============================================================
+// Generates a human-readable text file with timestamped entries
+// showing method, endpoint, status, request/response details.
+// Only available after the user has logged into the widget.
+function downloadLogs() {
+  if (!_isAuthenticated) return;
+  if (!_logData || _logData.length === 0) {
+    showStatus('qlStatus', 'info', 'No logs to download.');
+    return;
+  }
+
+  var lines = [];
+  lines.push('Zendesk JWT Auth — API Logs');
+  lines.push('Exported: ' + new Date().toLocaleString());
+  lines.push('Total entries: ' + _logData.length);
+  lines.push('='.repeat(80));
+  lines.push('');
+
+  for (var i = 0; i < _logData.length; i++) {
+    var log = _logData[i];
+    lines.push('[' + (log.timestamp ? new Date(log.timestamp).toLocaleString() : 'N/A') + ']');
+    lines.push('  ' + (log.method || '?') + ' ' + (log.action || 'Unknown'));
+    lines.push('  Status: ' + (log.status || '') + ' ' + (log.result || ''));
+    if (log.endpoint) lines.push('  Endpoint: ' + log.method + ' ' + log.endpoint);
+    if (log.fullUrl) lines.push('  URL: ' + log.fullUrl);
+    if (log.note) lines.push('  Note: ' + log.note);
+    if (log.request && Object.keys(log.request).length > 0) {
+      lines.push('  Request:');
+      lines.push('    ' + JSON.stringify(log.request, null, 2).split('\n').join('\n    '));
+    }
+    if (log.response) {
+      lines.push('  Response:');
+      lines.push('    ' + JSON.stringify(log.response, null, 2).split('\n').join('\n    '));
+    }
+    lines.push('-'.repeat(80));
+    lines.push('');
+  }
+
+  var text = lines.join('\n');
+  var blob = new Blob([text], { type: 'text/plain' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'api-logs-' + new Date().toISOString().slice(0, 10) + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// renderLogs — Updates the log count summary and nav badge.
+// Full log details are NOT displayed in the UI for security — they are
+// only available via the ⬇ Download button after authentication.
+// The log data is stored in _logData for download export.
+function renderLogs(logs) {
+  _logData = logs; // Store for download
+  var countEl = document.getElementById('logCount');
+  var navBadge = document.getElementById('navLogBadge');
+  var logList = document.getElementById('logList');
+
+  // Update count text
+  var successCount = 0;
+  var errorCount = 0;
+  for (var i = 0; i < logs.length; i++) {
+    if (logs[i].result === 'success') successCount++;
+    else if (logs[i].result === 'error') errorCount++;
+  }
+
+  var summary = logs.length + (logs.length === 1 ? ' entry' : ' entries');
+  if (logs.length > 0) {
+    summary += ' — ';
+    if (successCount > 0) summary += successCount + ' succeeded';
+    if (successCount > 0 && errorCount > 0) summary += ', ';
+    if (errorCount > 0) summary += errorCount + ' failed';
+  }
+  countEl.textContent = summary;
+
+  // Update nav badge
+  if (logs.length > 0) { navBadge.style.display = ''; navBadge.textContent = logs.length; }
+  else { navBadge.style.display = 'none'; }
+
+  // Show minimal summary in logList (no detailed entries)
+  if (logs.length === 0) {
+    logList.innerHTML = '';
+  } else {
+    logList.innerHTML = '<div style="font-size:13px;color:var(--text3);padding:8px 0">' +
+      'Last activity: ' + escapeHtml(logs[logs.length - 1].timestamp ? new Date(logs[logs.length - 1].timestamp).toLocaleString() : 'N/A') +
+      ' — Use ⬇ Download for full details.</div>';
+  }
+}
+
+// toggleLogEntry — Expands/collapses a log entry's detail section.
+function toggleLogEntry(id) {
+  var el = document.getElementById('log-' + id);
+  if (el) el.classList.toggle('open');
+}
+
+// escapeHtml — prevents XSS in log output by escaping HTML special characters.
+function escapeHtml(str) {
+  var div = document.createElement('div');
+  div.appendChild(document.createTextNode(str));
+  return div.innerHTML;
+}
+
+// _scheduleLogRefresh — Debounces log refresh by 500ms after each API call.
+// Prevents rapid re-renders when multiple API calls complete in quick succession.
+function _scheduleLogRefresh() {
+  if (_refreshPending) return;
+  _refreshPending = true;
+  setTimeout(function() { _refreshPending = false; refreshLogs(); }, 500);
+}
+
+// ============================================================
+// FETCH INTERCEPTOR — auto-refreshes logs after every API call
+// ============================================================
+// Replaces window.fetch with a wrapper that schedules a log refresh
+// after each non-/api/logs call completes. This ensures the API Logs
+// page stays up to date without manual refresh clicks.
+// _rawFetch preserves the original fetch for internal use (so the
+// log refresh call itself doesn't trigger another refresh).
+var _origFetch = window.fetch;
+window.fetch = function(url, options) {
+  var urlStr = (typeof url === 'string') ? url : (url.url || '');
+  var isLogCall = urlStr.indexOf('/api/logs') !== -1;
+  return _origFetch.apply(this, arguments).then(function(response) {
+    if (!isLogCall) _scheduleLogRefresh();
+    return response;
+  });
+};
+
+// ============================================================
+// PAGE INITIALIZATION
+// ============================================================
+// - Refreshes the API log display on load
+// - Updates the session indicator
+// - If a sessionId exists in sessionStorage, hides the config form and
+//   shows the steps section (Configuration page was already completed)
+// - Updates the User Login page state
+
+refreshLogs();
+updateSessionDot();
+
+if (sessionId) {
+  document.getElementById('configSection').style.display = 'none';
+  document.getElementById('configLock').style.display = '';
+  document.getElementById('stepsSection').style.display = '';
+
+  // Restore config page state from sessionStorage if available
+  // This handles page refreshes mid-flow (e.g., after creating user but before login)
+  var savedState = null;
+  try { savedState = JSON.parse(sessionStorage.getItem('zd_config_state') || 'null'); } catch(e) {}
+
+  if (savedState && savedState.step) {
+    createdUserId = savedState.createdUserId;
+    createdEmail = savedState.userEmail;
+
+    // Populate and lock step 1 (Create User)
+    document.getElementById('userName').value = savedState.userName || '';
+    document.getElementById('userName').disabled = true;
+    document.getElementById('userEmail').value = savedState.userEmail || '';
+    document.getElementById('userEmail').disabled = true;
+    document.getElementById('userExternalId').value = savedState.userExternalId || '';
+    document.getElementById('userExternalId').disabled = true;
+    document.getElementById('btnCreateUser').disabled = true;
+    document.getElementById('btnCreateUser').textContent = 'User Created ✓';
+
+    if (savedState.step >= 2) {
+      // Lock step 2 (Set Password)
+      document.getElementById('userPassword').disabled = true;
+      document.getElementById('userPassword').value = '••••••••';
+      document.getElementById('btnSetPassword').disabled = true;
+      document.getElementById('btnSetPassword').textContent = 'Password Set ✓';
+    }
+
+    if (savedState.step >= 3 && savedState.authed) {
+      // Step 3 completed — show auth success (but widget won't be active on refresh
+      // since snippet isn't injected without ?wk= redirect)
+      showStep(3);
+      document.getElementById('stepDot1').className = 'step-dot done';
+      document.getElementById('stepDot2').className = 'step-dot done';
+      document.getElementById('stepDot3').className = 'step-dot done';
+      document.getElementById('stepLine1').className = 'step-line done';
+      document.getElementById('stepLine2').className = 'step-line done';
+      document.getElementById('btnConfigLogin').style.display = 'none';
+      document.getElementById('configAuthSuccess').style.display = '';
+      document.getElementById('configAuthInfo').innerHTML =
+        '<strong>' + escapeHtml(savedState.userName || '') + '</strong> (' + escapeHtml(savedState.userEmail || '') + ')<br>External ID: ' + escapeHtml(savedState.userExternalId || '');
+      showStatus('step3Status', 'info', 'Session restored. The messaging widget is not active — click Reset All to start over, or use User Login to reconnect.');
+    } else if (savedState.step >= 2) {
+      showStep(3);
+      document.getElementById('stepDot1').className = 'step-dot done';
+      document.getElementById('stepLine1').className = 'step-line done';
+    } else {
+      showStep(2);
+      document.getElementById('stepDot1').className = 'step-dot done';
+      document.getElementById('stepLine1').className = 'step-line done';
+    }
+  } else {
+    // No saved state — default to showing step 1
+    showStep(1);
+  }
+
+  updateQlPage();
+}
+
+// ============================================================
+// AUTO-LOGIN AFTER REDIRECT — handles /?wk=WIDGET_KEY flow
+// ============================================================
+// When User Login succeeds, the page redirects to /?wk=WIDGET_KEY&sd=SUBDOMAIN.
+// The server intercepts this request and injects the Zendesk snippet <script>
+// into the HTML <head>. On page load, this IIFE detects the ?wk= parameter,
+// retrieves the auth data (JWT, user info) from sessionStorage, and:
+// 1. Cleans the URL (removes ?wk= so refreshes don't re-auth)
+// 2. Shows the User Login page in authenticated state (success card)
+// 3. Calls initWidget() which polls for the zE SDK and authenticates the user
+// 4. Clears sessionStorage auth data (one-time use for security)
+//
+// This redirect-based approach is necessary because the Zendesk snippet
+// MUST be in the initial HTML parse. Loading it dynamically causes an
+// InboundFilters crash in the SDK's module loader.
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  var widgetKey = params.get('wk');
+
+  if (widgetKey && sessionStorage.getItem('zd_jwt')) {
+    var jwt = sessionStorage.getItem('zd_jwt');
+    var user = JSON.parse(sessionStorage.getItem('zd_user') || 'null');
+
+    if (jwt && user) {
+      // Clean up the URL — remove ?wk= param so refreshes don't re-auth
+      var cleanUrl = window.location.pathname;
+      window.history.replaceState({}, '', cleanUrl);
+
+      // Show the authenticated state
+      var fromConfig = sessionStorage.getItem('zd_from_config');
+      var configState = null;
+      try { configState = JSON.parse(sessionStorage.getItem('zd_config_state') || 'null'); } catch(e) {}
+
+      // Restore sessionId from the redirect
+      sessionId = sessionStorage.getItem('zd_session_id') || sessionId;
+      updateSessionDot();
+
+      if (fromConfig && configState) {
+        // Came from Configuration page step 3 — restore config page with locked steps
+        switchPage('setup');
+        document.getElementById('configSection').style.display = 'none';
+        document.getElementById('configLock').style.display = '';
+        document.getElementById('stepsSection').style.display = '';
+
+        // Populate and lock step 1 (Create User)
+        document.getElementById('userName').value = configState.userName || '';
+        document.getElementById('userName').disabled = true;
+        document.getElementById('userEmail').value = configState.userEmail || '';
+        document.getElementById('userEmail').disabled = true;
+        document.getElementById('userExternalId').value = configState.userExternalId || '';
+        document.getElementById('userExternalId').disabled = true;
+        document.getElementById('btnCreateUser').disabled = true;
+        document.getElementById('btnCreateUser').textContent = 'User Created ✓';
+        createdUserId = configState.createdUserId;
+        createdEmail = configState.userEmail;
+
+        // Lock step 2 (Set Password)
+        document.getElementById('userPassword').disabled = true;
+        document.getElementById('userPassword').value = '••••••••';
+        document.getElementById('btnSetPassword').disabled = true;
+        document.getElementById('btnSetPassword').textContent = 'Password Set ✓';
+
+        // Show all 3 steps, all dots done
+        showStep(3);
+        document.getElementById('stepDot1').className = 'step-dot done';
+        document.getElementById('stepDot2').className = 'step-dot done';
+        document.getElementById('stepDot3').className = 'step-dot active';
+        document.getElementById('stepLine1').className = 'step-line done';
+        document.getElementById('stepLine2').className = 'step-line done';
+
+        // Show authenticated state in step 3
+        document.getElementById('btnConfigLogin').style.display = 'none';
+        document.getElementById('configAuthSuccess').style.display = '';
+        document.getElementById('configAuthInfo').innerHTML =
+          '<strong>' + escapeHtml(user.name) + '</strong> (' + escapeHtml(user.email) + ')<br>External ID: ' + escapeHtml(user.externalId);
+        showStatus('step3Status', 'success', 'Authenticated! The messaging widget is now active.');
+        _isAuthenticated = true;
+        updateAuthState();
+      } else {
+        // Came from User Login — show User Login success card
+        _isAuthenticated = true;
+        updateAuthState();
+        switchPage('quicklogin');
+        document.getElementById('qlConfig').style.display = 'none';
+        document.getElementById('qlLogin').style.display = 'none';
+        document.getElementById('qlSuccess').style.display = '';
+        document.getElementById('qlUserInfo').innerHTML =
+          '<strong>' + escapeHtml(user.name) + '</strong> (' + escapeHtml(user.email) + ')<br>' +
+          'External ID: ' + escapeHtml(user.externalId);
+        showStatus('qlStatus', 'info', 'Authenticating in Zendesk widget…');
+      }
+
+      // Initialize the widget — snippet is already in <head> from server injection
+      initWidget(widgetKey, jwt, user);
+
+      // Clear stored auth data (one-time use)
+      sessionStorage.removeItem('zd_jwt');
+      sessionStorage.removeItem('zd_user');
+      sessionStorage.removeItem('zd_widget_key');
+      sessionStorage.removeItem('zd_auth_token');
+      sessionStorage.removeItem('zd_session_id');
+      sessionStorage.removeItem('zd_from_config');
+      sessionStorage.removeItem('zd_config_state');
+    }
+  }
+})();
+</script>
+</body>
+</html>
