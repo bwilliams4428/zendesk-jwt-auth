@@ -184,11 +184,15 @@ function requireAuth(req, res, next) {
     return next();
   }
   if (req.method === 'POST' && (fullPath === '/api/quick-login' || fullPath.startsWith('/api/quick-login'))) {
-    // Quick login uses env config, no session needed — but rate-limited
-    if (!hasEnvConfig()) {
-      return res.status(400).json({ error: 'No configuration available. Set environment variables or save config first.' });
+    // Quick login can use env config OR session credentials
+    const qlSessionId = req.body?.sessionId;
+    if (hasEnvConfig()) {
+      return next(); // env vars configured — no session needed
     }
-    return next();
+    if (qlSessionId && getCredentials(qlSessionId)) {
+      return next(); // session credentials available — allow through
+    }
+    return res.status(400).json({ error: 'No configuration available. Set environment variables or save config on the Configuration page first.' });
   }
   if (req.method === 'POST' && (fullPath === '/api/config' || fullPath === '/api/config/')) {
     // Saving config is allowed — rate-limited
@@ -457,19 +461,39 @@ app.patch('/api/session/:id/widget-key', (req, res) => {
 // GET /api/config — Check if config exists
 // ============================================================
 app.get('/api/config', (req, res) => {
-  // Returns non-sensitive fields from environment variables only
+  // Returns non-sensitive fields from environment variables, plus session status
   const cfg = getEnvConfig();
-  if (cfg.subdomain && cfg.appId && cfg.keyId && cfg.secret) {
+  const hasEnv = !!(cfg.subdomain && cfg.appId && cfg.keyId && cfg.secret);
+  // Also check if there's an active session with credentials
+  const sessionId = req.query?.sessionId;
+  const sessionCreds = sessionId ? getCredentials(sessionId) : null;
+  const hasSession = !!sessionCreds;
+
+  if (hasEnv) {
     res.json({
       hasConfig: true,
+      configSource: 'environment',
       subdomain: cfg.subdomain,
       adminEmail: cfg.adminEmail || '',
       appId: cfg.appId,
       keyId: cfg.keyId,
-      widgetKey: cfg.widgetKey || ''
+      widgetKey: cfg.widgetKey || '',
+      hasSession
+    });
+  } else if (hasSession) {
+    // No env vars, but session credentials exist — show those (non-sensitive only)
+    res.json({
+      hasConfig: true,
+      configSource: 'session',
+      subdomain: sessionCreds.subdomain || '',
+      adminEmail: sessionCreds.adminEmail || '',
+      appId: sessionCreds.appId || '',
+      keyId: sessionCreds.keyId || '',
+      widgetKey: sessionCreds.widgetKey || '',
+      hasSession: true
     });
   } else {
-    res.json({ hasConfig: false });
+    res.json({ hasConfig: false, hasSession: false });
   }
 });
 
@@ -785,7 +809,7 @@ const AUTH_TTL = 120000; // 2 minutes
 // ============================================================
 app.post('/api/quick-login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, sessionId } = req.body;
 
     // MEDIUM 7: Input validation
     const emailErr = validateEmail(email);
@@ -793,9 +817,16 @@ app.post('/api/quick-login', async (req, res) => {
     if (!password || password.length < 5) return res.status(400).json({ error: 'Password is required (min 5 chars).' });
     if (password.length > 128) return res.status(400).json({ error: 'Password is too long.' });
 
-    const cfg = getEnvConfig();
+    // Get config: prefer env vars, fall back to session credentials
+    let cfg = getEnvConfig();
+    let configSource = 'environment';
     if (!hasEnvConfig()) {
-      return res.status(400).json({ error: 'No configuration available. Set environment variables first.' });
+      const sessionCreds = sessionId ? getCredentials(sessionId) : null;
+      if (!sessionCreds) {
+        return res.status(400).json({ error: 'No configuration available. Set environment variables or save config on the Configuration page first.' });
+      }
+      cfg = sessionCreds;
+      configSource = 'session';
     }
 
     // Step 1: Look up Zendesk user by email

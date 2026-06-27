@@ -10,12 +10,12 @@
   PAGES:
   1. Configuration — Save Zendesk admin + Sunco credentials (server-side session),
      then create a Zendesk end-user and set their password.
-  2. Quick Login — Authenticate an existing Zendesk user via JWT. Uses persisted
+  2. User Login — Authenticate an existing Zendesk user via JWT. Uses persisted
      config from environment variables so no session is needed. Generates a JWT server-side,
      redirects to /?wk=KEY for snippet injection, then authenticates via zE().
   3. API Logs — View all server-side API calls with expandable details.
   
-  AUTH FLOW (Quick Login):
+  AUTH FLOW (User Login):
   1. User enters email + password → POST /api/quick-login
   2. Server looks up Zendesk user by email, generates JWT
   3. Frontend stores auth data in sessionStorage, redirects to /?wk=WIDGET_KEY
@@ -185,13 +185,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 <body>
 
 <!-- ==================== NAVIGATION BAR ==================== -->
-<!-- Three tabs: Configuration, Quick Login, API Logs.
+<!-- Three tabs: Configuration, User Login, API Logs.
      Session indicator (green dot) shows if server-side credentials are stored.
      "Reset All" clears everything: session, config, logs, widget. -->
 <nav class="top-nav">
   <div class="nav-brand">Zendesk JWT Auth</div>
   <button class="nav-tab active" data-page="setup" onclick="switchPage('setup')">Configuration</button>
-  <button class="nav-tab" data-page="quicklogin" onclick="switchPage('quicklogin')">Quick Login</button>
+  <button class="nav-tab" data-page="quicklogin" onclick="switchPage('quicklogin')">User Login</button>
   <button class="nav-tab" data-page="logs" onclick="switchPage('logs')">API Logs <span class="nav-badge" id="navLogBadge"></span></button>
   <button class="nav-tab" data-page="docs" onclick="switchPage('docs')">Docs</button>
   <div class="nav-right">
@@ -314,11 +314,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
   </div>
 </div>
 
-<!-- ==================== PAGE: Quick Login ==================== -->
+<!-- ==================== PAGE: User Login ==================== -->
 <div class="page" id="pageQuicklogin">
   <div style="background:var(--primary-light);border:1px solid #b8dfe3;border-radius:var(--radius);padding:20px;margin-bottom:20px;font-size:13px;color:#034048;line-height:1.7">
-    <strong style="font-size:14px;display:block;margin-bottom:6px">ℹ️ How Quick Login Works</strong>
-    Quick Login lets you authenticate as a Zendesk end-user into the messaging widget in one step — just email and password.
+    <strong style="font-size:14px;display:block;margin-bottom:6px">ℹ️ How User Login Works</strong>
+    User Login lets you authenticate as a Zendesk end-user into the messaging widget in one step — just email and password.
     <br><br>
     <strong>What happens when you click Login:</strong>
     <ol style="margin:4px 0 0 20px;padding-left:16px">
@@ -328,30 +328,35 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
       <li>You can then <strong>chat as that user</strong> in the widget</li>
     </ol>
     <br>
-    <strong>First time?</strong> Your administrator needs to set the Zendesk credentials as environment variables on the hosting platform. Once configured, you can log in with just your email and password.
+    <strong>First time?</strong> You need credentials configured to log in. Either save them on the <em>Configuration</em> page tab, or ask your administrator to set the Zendesk environment variables on the hosting platform.
   </div>
 
-  <!-- Quick Login config status — shown when environment variables are not set.
-       Credentials are now configured via environment variables (not through the UI).
-       This card displays the current env var status. -->
+  <!-- User Login config status — shown when no config is available.
+       Credentials can come from environment variables OR from the
+       Configuration page session. This card shows the current status. -->
   <div id="qlConfig" class="card" style="display:none">
     <div class="card-header">⚙️ Zendesk Configuration</div>
     <div class="card-body">
       <div style="background:var(--warning-light);border:1px solid #e8cb8a;border-radius:var(--radius-sm);padding:12px 16px;font-size:13px;color:#6d4900;margin-bottom:16px">
         <strong>⚠️ Configuration Required</strong><br>
-        Credentials are now managed via <strong>environment variables</strong> for security. Set the following on your hosting platform (Render → Environment):
-        <ul style="margin:8px 0 0 20px;font-size:12px;font-family:'SF Mono',SFMono-Regular,Consolas,monospace">
-          <li><code>ZENDESK_SUBDOMAIN</code></li>
-          <li><code>ZENDESK_ADMIN_EMAIL</code></li>
-          <li><code>ZENDESK_API_TOKEN</code> (Secret)</li>
-          <li><code>SUNCO_APP_ID</code></li>
-          <li><code>SUNCO_KEY_ID</code></li>
-          <li><code>SUNCO_SECRET</code> (Secret)</li>
-          <li><code>ZENDESK_WIDGET_KEY</code></li>
+        Credentials can be provided in two ways:
+        <ul style="margin:8px 0 0 20px;font-size:12px">
+          <li><strong>Option 1:</strong> Save your credentials on the <em>Configuration</em> page tab (they'll be available here while your session is active)</li>
+          <li><strong>Option 2:</strong> Set <strong>environment variables</strong> on your hosting platform (Render → Environment):
+            <ul style="margin:4px 0 0 16px;font-size:12px;font-family:'SF Mono',SFMono-Regular,Consolas,monospace">
+              <li><code>ZENDESK_SUBDOMAIN</code></li>
+              <li><code>ZENDESK_ADMIN_EMAIL</code></li>
+              <li><code>ZENDESK_API_TOKEN</code> (Secret)</li>
+              <li><code>SUNCO_APP_ID</code></li>
+              <li><code>SUNCO_KEY_ID</code></li>
+              <li><code>SUNCO_SECRET</code> (Secret)</li>
+              <li><code>ZENDESK_WIDGET_KEY</code></li>
+            </ul>
+          </li>
         </ul>
       </div>
       <div id="qlConfigFields" style="display:none">
-        <p style="font-size:13px;color:var(--success);font-weight:600;margin-bottom:8px">✓ Configuration detected (from environment variables)</p>
+        <p style="font-size:13px;color:var(--success);font-weight:600;margin-bottom:8px">✓ Configuration detected <span id="qlConfigSource" style="font-weight:400;color:var(--text3)"></span></p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div class="form-group"><label class="form-label">Subdomain</label><input class="form-input" id="qlSubdomain" readonly style="background:var(--surface2)"></div>
           <div class="form-group"><label class="form-label">Admin Email</label><input class="form-input" id="qlAdminEmail" readonly style="background:var(--surface2)"></div>
@@ -359,15 +364,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
           <div class="form-group"><label class="form-label">Key ID</label><input class="form-input" id="qlKeyId" readonly style="background:var(--surface2)"></div>
           <div class="form-group" style="grid-column:1/-1"><label class="form-label">Widget Key</label><input class="form-input" id="qlWidgetKey" readonly style="background:var(--surface2)"></div>
         </div>
-        <div class="form-hint" style="margin-top:8px">Sensitive fields (API Token, Secret Key) are never exposed. Configuration is read-only — update via environment variables.</div>
+        <div class="form-hint" style="margin-top:8px">Sensitive fields (API Token, Secret Key) are never exposed. Configuration is read-only — update via environment variables or the Configuration page.</div>
       </div>
       <div class="status-box" id="qlConfigStatus"></div>
     </div>
   </div>
 
-  <!-- Login form — shown after config is saved. Sends email + password to
-       POST /api/quick-login, which looks up the Zendesk user, generates a JWT,
-       and returns everything needed to authenticate via the messaging widget. -->
+  <!-- Login form — shown after config is available (env vars or session).
+       Sends email + password to POST /api/quick-login, which looks up
+       the Zendesk user, generates a JWT, and returns auth data. -->
   <div id="qlLogin" class="card" style="display:none">
     <div class="card-header">🔐 Login</div>
     <div class="card-body">
@@ -474,8 +479,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
   </div>
 
   <div class="doc-section">
-    <h3>⚡ Quick Login Page</h3>
-    <p>Quick Login authenticates an existing Zendesk end-user into the messaging widget in one step — just email and password. It uses <strong>environment variables</strong> set on the hosting platform, so credentials survive restarts and redeploys securely.</p>
+    <h3>⚡ User Login Page</h3>
+    <p>User Login authenticates an existing Zendesk end-user into the messaging widget in one step — just email and password. It uses <strong>environment variables</strong> set on the hosting platform (or credentials saved on the Configuration page), so credentials survive restarts and redeploys securely.</p>
 
     <h4>How it works</h4>
     <div class="doc-step">
@@ -508,7 +513,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     </div>
 
     <div class="doc-callout">
-      💡 <strong>First time?</strong> If environment variables are not configured, you'll see a warning on the Quick Login page. An administrator needs to set <code>ZENDESK_SUBDOMAIN</code>, <code>ZENDESK_ADMIN_EMAIL</code>, <code>ZENDESK_API_TOKEN</code>, <code>SUNCO_APP_ID</code>, <code>SUNCO_KEY_ID</code>, <code>SUNCO_SECRET</code>, and <code>ZENDESK_WIDGET_KEY</code> on the hosting platform.
+      💡 <strong>First time?</strong> If environment variables are not configured, you'll see a warning on the User Login page. Either set <code>ZENDESK_SUBDOMAIN</code>, <code>ZENDESK_ADMIN_EMAIL</code>, <code>ZENDESK_API_TOKEN</code>, <code>SUNCO_APP_ID</code>, <code>SUNCO_KEY_ID</code>, <code>SUNCO_SECRET</code>, and <code>ZENDESK_WIDGET_KEY</code> on the hosting platform, or save credentials on the Configuration page.
     </div>
   </div>
 
@@ -525,14 +530,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     <p>The app consists of two files:</p>
     <ul>
       <li><strong><code>server.js</code></strong> — Express backend that proxies all Zendesk/Sunco API calls (avoiding CORS), signs JWTs, stores credentials server-side, and injects the Zendesk snippet into the HTML.</li>
-      <li><strong><code>index.html</code></strong> — Single-page app with four pages (Configuration, Quick Login, API Logs, Docs). All state management happens client-side, but credentials are never stored in the browser.</li>
+      <li><strong><code>index.html</code></strong> — Single-page app with four pages (Configuration, User Login, API Logs, Docs). All state management happens client-side, but credentials are never stored in the browser.</li>
     </ul>
 
     <h4>Two Credential Storage Mechanisms</h4>
     <table class="doc-table">
       <tr><th>Mechanism</th><th>Used by</th><th>Storage</th><th>Persists?</th></tr>
       <tr><td><strong>In-memory session</strong></td><td>Configuration page</td><td><code>credentialsStore</code> object in server RAM, keyed by random <code>sessionId</code></td><td>No — expires after 15 min idle, lost on server restart</td></tr>
-      <tr><td><strong>Environment variables</strong></td><td>Quick Login page</td><td>Server <code>process.env</code> (set on hosting platform)</td><td>Yes — survives restarts and redeploys</td></tr>
+      <tr><td><strong>Environment variables</strong></td><td>User Login page</td><td>Server <code>process.env</code> (set on hosting platform)</td><td>Yes — survives restarts and redeploys</td></tr>
+      <tr><td><strong>In-memory session</strong> (fallback)</td><td>User Login page</td><td><code>credentialsStore</code> keyed by <code>sessionId</code></td><td>No — same as Configuration page session</td></tr>
     </table>
 
     <h4>JWT Generation</h4>
@@ -544,7 +550,7 @@ Sign:    HMAC-SHA256(secret_as_raw_string, header_b64url + "." + payload_b64url)
     <p>The <code>kid</code> (Key ID) in the header tells Zendesk which API key was used to sign the token. The <code>scope: "user"</code> claim is required for messenger authentication — using <code>"end_user"</code> will cause a login failure.</p>
 
     <h4>Widget Snippet Injection</h4>
-    <p>The Zendesk messaging widget (<code>snippet.js</code>) <strong>cannot</strong> be loaded dynamically via <code>document.createElement('script')</code> after page load — this causes an <code>InboundFilters</code> crash in the SDK's module loader. Instead, when Quick Login succeeds, the page redirects to <code>/?wk=WIDGET_KEY&sd=SUBDOMAIN</code>. The server intercepts this request, reads <code>index.html</code>, injects the <code>&lt;script id="ze-snippet"&gt;</code> tag into <code>&lt;head&gt;</code>, and serves the modified HTML. This way the snippet is part of the initial HTML parse, exactly as Zendesk intends.</p>
+    <p>The Zendesk messaging widget (<code>snippet.js</code>) <strong>cannot</strong> be loaded dynamically via <code>document.createElement('script')</code> after page load — this causes an <code>InboundFilters</code> crash in the SDK's module loader. Instead, when User Login succeeds, the page redirects to <code>/?wk=WIDGET_KEY&sd=SUBDOMAIN</code>. The server intercepts this request, reads <code>index.html</code>, injects the <code>&lt;script id="ze-snippet"&gt;</code> tag into <code>&lt;head&gt;</code>, and serves the modified HTML. This way the snippet is part of the initial HTML parse, exactly as Zendesk intends.</p>
 
     <h4>Fetch Interceptor</h4>
     <p>The frontend replaces <code>window.fetch</code> with an interceptor that schedules an API log refresh after every non-<code>/api/logs</code> call. This ensures the API Logs page stays current without manual refresh. The original <code>fetch</code> is preserved as <code>_rawFetch</code> for internal use (so log refreshes don't trigger recursive refreshes).</p>
@@ -607,7 +613,7 @@ Sign:    HMAC-SHA256(secret_as_raw_string, header_b64url + "." + payload_b64url)
 // ============================================================
 // The frontend stores minimal state — no credentials are kept in the browser.
 // The sessionId is the only reference to server-side credential storage
-// (used by the Configuration page). Quick Login uses persisted config
+// (used by the Configuration page). User Login uses persisted config
 // on the server and doesn't need a sessionId at all.
 var sessionId = sessionStorage.getItem('zd_session_id') || null;
 
@@ -771,7 +777,7 @@ function createZendeskUser() {
 // STEP 2: SET PASSWORD
 // ============================================================
 // Sets a password for the newly created Zendesk end-user. This is
-// required for the Quick Login flow — the user needs a password to
+// required for the User Login flow — the user needs a password to
 // authenticate. Calls POST /api/zendesk-users/:id/password with the
 // user's numeric ID (from step 1) and the chosen password.
 // Minimum password length is 5 characters per Zendesk requirements.
@@ -916,10 +922,12 @@ function configLogout() {
 }
 
 // ============================================================
-// QUICK LOGIN PAGE — Self-contained: config + login on one page
+// USER LOGIN PAGE — Self-contained: config + login on one page
 // ============================================================
-// The Quick Login page is a self-contained flow that doesn't require a
-// server-side session. It uses environment variables instead.
+// The User Login page is a self-contained flow that doesn't require a
+// server-side session (when env vars are configured). It uses environment
+// variables as the primary config source, but also falls back to session
+// credentials from the Configuration page.
 //
 // The page has 3 states:
 // 1. Config form (qlConfig) — shown if no persisted config exists yet
@@ -1006,28 +1014,34 @@ function authenticateUser(jwt, user) {
 // Used to determine whether to show the config form or the login form.
 var _qlHasConfig = false;
 
-// updateQlPage — Checks the server for env-var config and shows the
-// appropriate Quick Login sub-view:
-// - If config exists: shows read-only env var info and the login form
-// - If no config: shows warning that env vars need to be set
+// updateQlPage — Checks the server for config (env vars or session) and shows the
+// appropriate User Login sub-view:
+// - If config exists (env vars or session): shows read-only config info and the login form
+// - If no config and no session: shows warning that env vars or Configuration page setup is needed
 function updateQlPage() {
-  // Check server for config (now from environment variables)
-  _rawFetch('/api/config').then(function(r) { return r.json(); }).then(function(data) {
+  // Send sessionId so the server can check session credentials too
+  var configUrl = '/api/config';
+  if (sessionId) configUrl += '?sessionId=' + encodeURIComponent(sessionId);
+
+  _rawFetch(configUrl).then(function(r) { return r.json(); }).then(function(data) {
     _qlHasConfig = data.hasConfig;
     if (data.hasConfig) {
-      // Show read-only config fields from env vars (non-sensitive only)
+      // Show read-only config fields (non-sensitive only)
       document.getElementById('qlConfigFields').style.display = '';
       if (data.subdomain) document.getElementById('qlSubdomain').value = data.subdomain;
       if (data.adminEmail) document.getElementById('qlAdminEmail').value = data.adminEmail;
       if (data.appId) document.getElementById('qlAppId').value = data.appId;
       if (data.keyId) document.getElementById('qlKeyId').value = data.keyId;
       if (data.widgetKey) document.getElementById('qlWidgetKey').value = data.widgetKey;
+      // Update config source label
+      var sourceLabel = data.configSource === 'session' ? 'from Configuration page session' : 'from environment variables';
+      document.getElementById('qlConfigSource').textContent = sourceLabel;
       // Show login form
       document.getElementById('qlConfig').style.display = 'none';
       document.getElementById('qlLogin').style.display = '';
       document.getElementById('qlSuccess').style.display = 'none';
     } else {
-      // Show config warning card (env vars not set)
+      // Show config warning card (no env vars and no session)
       document.getElementById('qlConfigFields').style.display = 'none';
       document.getElementById('qlConfig').style.display = '';
       document.getElementById('qlLogin').style.display = 'none';
@@ -1040,18 +1054,20 @@ function updateQlPage() {
 }
 
 // saveQlConfig — No longer saves secrets via the UI.
-// Credentials are now managed via environment variables.
-// This function is kept for backward compat but shows an error directing users to env vars.
+// Credentials are managed via environment variables or the Configuration page.
+// This function is kept for backward compat but shows an error directing users.
 function saveQlConfig() {
-  showStatus('qlConfigStatus', 'error', 'Configuration is now managed via environment variables. Set ZENDESK_SUBDOMAIN, ZENDESK_ADMIN_EMAIL, ZENDESK_API_TOKEN, SUNCO_APP_ID, SUNCO_KEY_ID, SUNCO_SECRET, and ZENDESK_WIDGET_KEY on your hosting platform.');
+  showStatus('qlConfigStatus', 'error', 'Configuration is managed via environment variables or the Configuration page. Set ZENDESK_SUBDOMAIN, ZENDESK_ADMIN_EMAIL, ZENDESK_API_TOKEN, SUNCO_APP_ID, SUNCO_KEY_ID, SUNCO_SECRET, and ZENDESK_WIDGET_KEY on your hosting platform, or save credentials on the Configuration page.');
 }
 
-// editQlConfig — Shows the config info card with env var details
+// editQlConfig — Shows the config info card with config details
 function editQlConfig() {
   document.getElementById('qlLogin').style.display = 'none';
   document.getElementById('qlConfig').style.display = '';
-  // Pre-fill non-sensitive fields from server (read-only, from env vars)
-  _rawFetch('/api/config').then(function(r) { return r.json(); }).then(function(data) {
+  // Pre-fill non-sensitive fields from server (read-only, from env vars or session)
+  var configUrl = '/api/config';
+  if (sessionId) configUrl += '?sessionId=' + encodeURIComponent(sessionId);
+  _rawFetch(configUrl).then(function(r) { return r.json(); }).then(function(data) {
     if (data.hasConfig) {
       document.getElementById('qlConfigFields').style.display = '';
       if (data.subdomain) document.getElementById('qlSubdomain').value = data.subdomain;
@@ -1059,16 +1075,19 @@ function editQlConfig() {
       if (data.appId) document.getElementById('qlAppId').value = data.appId;
       if (data.keyId) document.getElementById('qlKeyId').value = data.keyId;
       if (data.widgetKey) document.getElementById('qlWidgetKey').value = data.widgetKey;
+      var sourceLabel = data.configSource === 'session' ? 'from Configuration page session' : 'from environment variables';
+      document.getElementById('qlConfigSource').textContent = sourceLabel;
     } else {
       document.getElementById('qlConfigFields').style.display = 'none';
     }
   }).catch(function() {});
 }
 
-// quickLogin — The core Quick Login flow.
+// quickLogin — The core User Login flow.
 // 1. Validates email + password
 // 2. POST /api/quick-login → server looks up the Zendesk user by email,
 //    verifies the user has an external_id, and generates a JWT
+//    (uses env config or falls back to session credentials from Configuration page)
 // 3. Stores JWT + user + widgetKey in sessionStorage
 // 4. Redirects to /?wk=WIDGET_KEY so the server can inject the Zendesk
 //    snippet into <head> (avoids the InboundFilters error from dynamic loading)
@@ -1081,10 +1100,14 @@ function quickLogin() {
   showStatus('qlStatus', 'info', 'Authenticating…');
   document.getElementById('btnQlLogin').disabled = true;
 
+  // Include sessionId so server can fall back to session credentials if env vars aren't set
+  var payload = { email: email, password: password };
+  if (sessionId) payload.sessionId = sessionId;
+
   _rawFetch('/api/quick-login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: email, password: password })
+    body: JSON.stringify(payload)
   }).then(function(r) { return r.json(); }).then(function(data) {
     document.getElementById('btnQlLogin').disabled = false;
     if (data.error) {
@@ -1115,7 +1138,7 @@ function quickLogin() {
 }
 
 // quickLogout — Logs the user out of the Zendesk messenger widget and
-// resets the Quick Login page back to the login form.
+// resets the User Login page back to the login form.
 function quickLogout() {
   try { zE('messenger', 'logoutUser'); } catch(e) {}
   try { zE('messenger', 'close'); } catch(e) {}
@@ -1131,7 +1154,7 @@ function quickLogout() {
 // ============================================================
 // Removes the Zendesk widget (script + DOM elements), deletes the
 // server-side session and persisted config, clears all form fields,
-// resets the Quick Login page, and navigates to the Configuration page.
+// resets the User Login page, and navigates to the Configuration page.
 function fullReset() {
   if (!confirm('This will delete ALL data: credentials, logs, form fields, and the messaging widget. Continue?')) return;
 
@@ -1169,7 +1192,7 @@ function fullReset() {
   document.getElementById('logCount').textContent = '0 entries';
   document.getElementById('navLogBadge').style.display = 'none';
 
-  // Reset Quick Login state (config is env vars now — no API delete needed)
+  // Reset User Login state (config is env vars now — no API delete needed)
   _qlHasConfig = false;
   document.getElementById('qlConfig').style.display = '';
   document.getElementById('qlLogin').style.display = 'none';
@@ -1343,7 +1366,7 @@ window.fetch = function(url, options) {
 // - Updates the session indicator
 // - If a sessionId exists in sessionStorage, hides the config form and
 //   shows the steps section (Configuration page was already completed)
-// - Updates the Quick Login page state
+// - Updates the User Login page state
 
 refreshLogs();
 updateSessionDot();
@@ -1393,7 +1416,7 @@ if (sessionId) {
       document.getElementById('configAuthSuccess').style.display = '';
       document.getElementById('configAuthInfo').innerHTML =
         '<strong>' + escapeHtml(savedState.userName || '') + '</strong> (' + escapeHtml(savedState.userEmail || '') + ')<br>External ID: ' + escapeHtml(savedState.userExternalId || '');
-      showStatus('step3Status', 'info', 'Session restored. The messaging widget is not active — click Reset All to start over, or use Quick Login to reconnect.');
+      showStatus('step3Status', 'info', 'Session restored. The messaging widget is not active — click Reset All to start over, or use User Login to reconnect.');
     } else if (savedState.step >= 2) {
       showStep(3);
       document.getElementById('stepDot1').className = 'step-dot done';
@@ -1414,12 +1437,12 @@ if (sessionId) {
 // ============================================================
 // AUTO-LOGIN AFTER REDIRECT — handles /?wk=WIDGET_KEY flow
 // ============================================================
-// When Quick Login succeeds, the page redirects to /?wk=WIDGET_KEY&sd=SUBDOMAIN.
+// When User Login succeeds, the page redirects to /?wk=WIDGET_KEY&sd=SUBDOMAIN.
 // The server intercepts this request and injects the Zendesk snippet <script>
 // into the HTML <head>. On page load, this IIFE detects the ?wk= parameter,
 // retrieves the auth data (JWT, user info) from sessionStorage, and:
 // 1. Cleans the URL (removes ?wk= so refreshes don't re-auth)
-// 2. Shows the Quick Login page in authenticated state (success card)
+// 2. Shows the User Login page in authenticated state (success card)
 // 3. Calls initWidget() which polls for the zE SDK and authenticates the user
 // 4. Clears sessionStorage auth data (one-time use for security)
 //
@@ -1488,7 +1511,7 @@ if (sessionId) {
           '<strong>' + escapeHtml(user.name) + '</strong> (' + escapeHtml(user.email) + ')<br>External ID: ' + escapeHtml(user.externalId);
         showStatus('step3Status', 'success', 'Authenticated! The messaging widget is now active.');
       } else {
-        // Came from Quick Login — show Quick Login success card
+        // Came from User Login — show User Login success card
         switchPage('quicklogin');
         document.getElementById('qlConfig').style.display = 'none';
         document.getElementById('qlLogin').style.display = 'none';
