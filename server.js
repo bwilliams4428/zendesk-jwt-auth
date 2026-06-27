@@ -55,12 +55,13 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://static.zdassets.com"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://static.zdassets.com", "https://api.smooch.io"],
       scriptSrcAttr: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:"],
-      connectSrc: ["'self'", "https://*.zendesk.com", "https://*.zdassets.com"],
-      frameSrc: ["https://*.zendesk.com", "https://*.zdassets.com"],
+      imgSrc: ["'self'", "data:", "https://www.gravatar.com", "https://*.zdassets.com"],
+      connectSrc: ["'self'", "https://*.zendesk.com", "https://*.zdassets.com", "https://api.smooch.io", "wss://api.smooch.io", "https://*.smooch.io"],
+      frameSrc: ["https://*.zendesk.com", "https://*.zdassets.com", "https://*.smooch.io"],
+      fontSrc: ["'self'", "https:", "data:"],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
       formAction: ["'self'"]
