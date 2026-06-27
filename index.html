@@ -403,10 +403,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 </div>
 
 <!-- ==================== PAGE: API Logs ==================== -->
-<!-- Displays all server-side API calls (Zendesk, Sunco, JWT) with method,
-     status, and expandable request/response details. Auto-refreshes after
-     each API call via the fetch interceptor. Sensitive fields are redacted.
-     Download button is only available after the user has logged into the widget. -->
+<!-- Shows a summary of API call activity. Full log details are only available
+     via the ⬇ Download button after authentication. This prevents sensitive
+     request/response data from being displayed in the browser. -->
 <div class="page" id="pageLogs">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
     <h2 style="font-size:18px;font-weight:700;color:var(--text)">API Logs</h2>
@@ -418,6 +417,30 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
   </div>
   <div style="font-size:12px;color:var(--text3);margin-bottom:12px" id="logCount">0 entries</div>
   <div id="logList"></div>
+  <div id="logInfo" style="margin-top:16px">
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <span style="font-size:22px">🔒</span>
+        <div style="font-size:15px;font-weight:600;color:var(--text)">API Logs — Summary View</div>
+      </div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.7">
+        <p style="margin:0 0 10px 0">This page tracks all server-side API calls made during your session — including Zendesk, Sunshine Conversations, and JWT operations. <strong>Full log details (endpoints, request/response bodies) are not displayed here for security.</strong></p>
+        <p style="margin:0 0 10px 0">To access the complete logs:</p>
+        <ol style="margin:0 0 10px 0;padding-left:20px">
+          <li><strong>Log in</strong> via the Configuration page or User Login page</li>
+          <li>Click the <strong>⬇ Download</strong> button above to export all logs as a text file</li>
+        </ol>
+        <p style="margin:0 0 10px 0">The downloaded file includes:</p>
+        <ul style="margin:0 0 10px 0;padding-left:20px">
+          <li>Timestamp, HTTP method, and action for each call</li>
+          <li>Status codes and result labels</li>
+          <li>Full endpoint URLs</li>
+          <li>Request and response bodies (sensitive fields redacted)</li>
+        </ul>
+        <p style="margin:0;color:var(--text3);font-size:12px">Click <strong>↻ Refresh</strong> to update the summary count. Click <strong>✕ Clear</strong> to delete all stored logs.</p>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ==================== PAGE: Documentation ==================== -->
@@ -1342,60 +1365,45 @@ function downloadLogs() {
   URL.revokeObjectURL(url);
 }
 
-// renderLogs — Renders the log entries into the #logList container.
-// Preserves the open/closed state of expandable entries across re-renders
-// by tracking which entry IDs have the .open class. Uses hash-based
-// change detection to skip DOM updates when logs haven't changed.
-// Each entry shows: method badge, action label, status badge, and timestamp.
-// Expanding shows: endpoint, full URL, note, request body, response body.
+// renderLogs — Updates the log count summary and nav badge.
+// Full log details are NOT displayed in the UI for security — they are
+// only available via the ⬇ Download button after authentication.
+// The log data is stored in _logData for download export.
 function renderLogs(logs) {
   _logData = logs; // Store for download
-  var list = document.getElementById('logList');
   var countEl = document.getElementById('logCount');
   var navBadge = document.getElementById('navLogBadge');
-  countEl.textContent = logs.length + (logs.length === 1 ? ' entry' : ' entries');
+  var logList = document.getElementById('logList');
+
+  // Update count text
+  var successCount = 0;
+  var errorCount = 0;
+  for (var i = 0; i < logs.length; i++) {
+    if (logs[i].result === 'success') successCount++;
+    else if (logs[i].result === 'error') errorCount++;
+  }
+
+  var summary = logs.length + (logs.length === 1 ? ' entry' : ' entries');
+  if (logs.length > 0) {
+    summary += ' — ';
+    if (successCount > 0) summary += successCount + ' succeeded';
+    if (successCount > 0 && errorCount > 0) summary += ', ';
+    if (errorCount > 0) summary += errorCount + ' failed';
+  }
+  countEl.textContent = summary;
+
+  // Update nav badge
   if (logs.length > 0) { navBadge.style.display = ''; navBadge.textContent = logs.length; }
   else { navBadge.style.display = 'none'; }
 
-  var hash = JSON.stringify(logs);
-  if (hash === _lastLogHash) return;
-  _lastLogHash = hash;
-
+  // Show minimal summary in logList (no detailed entries)
   if (logs.length === 0) {
-    list.innerHTML = '<div class="log-empty"><div class="log-empty-icon">📋</div><div class="log-empty-title">No API calls yet</div><div class="log-empty-text">Logs will appear here as you make API calls.</div></div>';
-    return;
+    logList.innerHTML = '';
+  } else {
+    logList.innerHTML = '<div style="font-size:13px;color:var(--text3);padding:8px 0">' +
+      'Last activity: ' + escapeHtml(logs[logs.length - 1].timestamp ? new Date(logs[logs.length - 1].timestamp).toLocaleString() : 'N/A') +
+      ' — Use ⬇ Download for full details.</div>';
   }
-
-  var openIds = [];
-  var existing = list.querySelectorAll('.log-entry.open');
-  for (var e = 0; e < existing.length; e++) { openIds.push(existing[e].id); }
-
-  var html = '';
-  for (var i = 0; i < logs.length; i++) {
-    var log = logs[i];
-    var statusClass = log.result === 'success' ? 'success' : (log.result === 'error' ? 'error' : 'conflict');
-    var methodClass = log.method || 'POST';
-    var time = log.timestamp ? new Date(log.timestamp).toLocaleString() : '';
-    var isOpen = openIds.indexOf('log-' + log.id) !== -1;
-
-    html += '<div class="log-entry' + (isOpen ? ' open' : '') + '" id="log-' + log.id + '">';
-    html += '<div class="log-entry-header" onclick="toggleLogEntry(' + log.id + ')">';
-    html += '<span class="log-method ' + methodClass + '">' + (log.method || '?') + '</span>';
-    html += '<span class="log-action">' + escapeHtml(log.action || 'Unknown') + '</span>';
-    html += '<span class="log-status ' + statusClass + '">' + (log.status || '') + ' ' + escapeHtml(log.result || '') + '</span>';
-    html += '<span class="log-time">' + escapeHtml(time) + '</span>';
-    html += '</div>';
-    html += '<div class="log-entry-body" id="log-body-' + log.id + '">';
-
-    if (log.endpoint) html += '<div class="log-section"><div class="log-section-title">Endpoint</div><div class="log-json">' + escapeHtml(log.method + ' ' + log.endpoint) + '</div></div>';
-    if (log.fullUrl) html += '<div class="log-section"><div class="log-section-title">Full URL</div><div class="log-json">' + escapeHtml(log.fullUrl) + '</div></div>';
-    if (log.note) html += '<div class="log-section"><div class="log-section-title">Note</div><div class="log-json">' + escapeHtml(log.note) + '</div></div>';
-    if (log.request && Object.keys(log.request).length > 0) html += '<div class="log-section"><div class="log-section-title">Request Body</div><div class="log-json">' + escapeHtml(JSON.stringify(log.request, null, 2)) + '</div></div>';
-    if (log.response) html += '<div class="log-section"><div class="log-section-title">Response Body</div><div class="log-json">' + escapeHtml(JSON.stringify(log.response, null, 2)) + '</div></div>';
-
-    html += '</div></div>';
-  }
-  list.innerHTML = html;
 }
 
 // toggleLogEntry — Expands/collapses a log entry's detail section.
