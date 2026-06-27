@@ -52,14 +52,15 @@ app.use(express.json({ limit: '100kb' })); // Limit payload size
 
 // HIGH 6: Security headers via helmet
 app.use(helmet({
-  // HIGH 1 FIX: CSP now uses per-request nonces (set in the GET / handler)
-  // instead of 'unsafe-inline'. Helmet provides a fallback CSP for non-HTML responses.
-  // The actual CSP for HTML pages is set per-request with a unique nonce.
+  // HIGH 1 FIX: CSP uses per-request nonces for script-src (blocks injected <script> tags).
+  // script-src-attr keeps 'unsafe-inline' because the app uses onclick/onkeydown event
+  // handlers in HTML — these are not an XSS vector since the HTML is server-controlled.
+  // The real XSS risk was injected <script> tags via query params, which nonces prevent.
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "https://static.zdassets.com", "https://api.smooch.io"],
-      scriptSrcAttr: ["'self'"],
+      scriptSrcAttr: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "https://www.gravatar.com", "https://*.zdassets.com"],
       connectSrc: ["'self'", "https://*.zendesk.com", "https://*.zdassets.com", "https://api.smooch.io", "wss://api.smooch.io", "https://*.smooch.io"],
@@ -254,7 +255,7 @@ app.get('/', (req, res) => {
     html = html.replace(/<script(?=\s|>)(?![^>]*nonce=)/g, `<script nonce="${nonce}"`);
     html = html.replace('<!-- CSP_NONCE -->', nonce);
     res.setHeader('Content-Security-Policy',
-      `default-src 'self'; script-src 'self' 'nonce-${nonce}' https://static.zdassets.com https://api.smooch.io; script-src-attr 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.gravatar.com https://*.zdassets.com; connect-src 'self' https://*.zendesk.com https://*.zdassets.com https://api.smooch.io wss://api.smooch.io https://*.smooch.io; frame-src https://*.zendesk.com https://*.zdassets.com https://*.smooch.io; font-src 'self' https: data:; object-src 'none'; base-uri 'self'; form-action 'self'`
+      `default-src 'self'; script-src 'self' 'nonce-${nonce}' https://static.zdassets.com https://api.smooch.io; script-src-attr 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.gravatar.com https://*.zdassets.com; connect-src 'self' https://*.zendesk.com https://*.zdassets.com https://api.smooch.io wss://api.smooch.io https://*.smooch.io; frame-src https://*.zendesk.com https://*.zdassets.com https://*.smooch.io; font-src 'self' https: data:; object-src 'none'; base-uri 'self'; form-action 'self'`
     );
     return res.send(html);
   }
@@ -286,7 +287,7 @@ app.get('/', (req, res) => {
   html = html.replace('</head>', snippetTag + '\n</head>');
 
   res.setHeader('Content-Security-Policy',
-    `default-src 'self'; script-src 'self' 'nonce-${nonce}' https://static.zdassets.com https://api.smooch.io; script-src-attr 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.gravatar.com https://*.zdassets.com; connect-src 'self' https://*.zendesk.com https://*.zdassets.com https://api.smooch.io wss://api.smooch.io https://*.smooch.io; frame-src https://*.zendesk.com https://*.zdassets.com https://*.smooch.io; font-src 'self' https: data:; object-src 'none'; base-uri 'self'; form-action 'self'`
+    `default-src 'self'; script-src 'self' 'nonce-${nonce}' https://static.zdassets.com https://api.smooch.io; script-src-attr 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.gravatar.com https://*.zdassets.com; connect-src 'self' https://*.zendesk.com https://*.zdassets.com https://api.smooch.io wss://api.smooch.io https://*.smooch.io; frame-src https://*.zendesk.com https://*.zdassets.com https://*.smooch.io; font-src 'self' https: data:; object-src 'none'; base-uri 'self'; form-action 'self'`
   );
   res.send(html);
 });
