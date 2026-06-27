@@ -26,21 +26,25 @@ This app automates all of that. It acts as a lightweight proxy server that keeps
 
 Each step locks after completion — fields become read-only to prevent accidental changes. The page only resets when you click **Reset All**.
 
-### Quick Login Page
+### User Login Page
 
 For users you've already created. Enter email + password → the server looks up the Zendesk user, signs a JWT, and opens the authenticated widget.
 
+> **Locked until configuration is complete.** The User Login tab is disabled until you've saved valid Zendesk credentials on the Configuration page and authenticated.
+
 ### API Logs Page
 
-Every Zendesk and Sunco API call made by the server is logged with full request/response details (credentials redacted). Requires authentication to view.
+Every Zendesk and Sunco API call made by the server is logged with full request/response details (credentials redacted). Shows a summary view in the UI with a download button for full details.
+
+> **Locked until authentication is performed.** API Logs are only accessible after you've logged in through the Configuration page or User Login page.
 
 ## Architecture
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  Browser (index.html SPA)                        │
+│  Browser (public/index.html SPA)                  │
 │  ┌────────────┐ ┌────────────┐ ┌─────────────┐ │
-│  │ Config      │ │ Quick Login│ │ API Logs     │ │
+│  │ Config      │ │ User Login │ │ API Logs     │ │
 │  │ 3-step      │ │ Email+Pass │ │ Debug view   │ │
 │  │ wizard      │ │ → JWT auth │ │              │ │
 │  └──────┬──────┘ └─────┬──────┘ └──────────────┘ │
@@ -59,6 +63,8 @@ Every Zendesk and Sunco API call made by the server is logged with full request/
 │  • Injects Zendesk widget snippet into <head>     │
 │    when ?wk= query param is present               │
 │  • Rate limiting, helmet, input validation         │
+│  • Per-request CSP nonces for script-src           │
+│  • Static assets served from public/ only          │
 └──────────────────────────────────────────────────┘
           │                          
           ▼                          
@@ -106,7 +112,7 @@ All `/api/` endpoints require authentication (valid sessionId or `X-API-Key` hea
 - **Zendesk Admin email + API token** — for creating users and setting passwords via the Admin API
 - **Sunco App ID** — from Sunshine Conversations settings
 - **Sunco Key ID + Secret Key** — for creating Sunco user profiles and signing JWTs (Conversations API key token)
-- **Widget Key** — from Admin Center → Channels → Messaging → Web Widget → Installation
+- **Widget Key** — from Admin Center → Channels → Messaging → Web Widget → Installation (required)
 
 ### Environment Variables
 
@@ -177,17 +183,37 @@ The server listens on `PORT` (defaults to 3000). Render sets this automatically.
 
 ## Security
 
+### Credentials & Secrets
 - **Credentials stored in environment variables** — never in `config.json` or client-side storage
 - **JWTs are signed server-side** — the Secret Key never reaches the browser
-- **API endpoints require authentication** — sessionId or API key header
-- **API logs redact** all password, token, and secret values
 - **Sessions expire after 15 minutes** of inactivity (in-memory TTL)
 - **JWTs expire after 15 minutes** — reduced from 1 hour
-- **Rate limiting** on auth and user-creation endpoints (5–20 req/15min per IP)
-- **Security headers** via helmet middleware (CSP, X-Frame-Options, etc.)
-- **Input validation** on email, name, external ID, and password fields
 - **Production error handling** — no stack traces leaked to clients
+
+### API Security
+- **API endpoints require authentication** — sessionId or API key header
+- **API logs redact** all password, token, and secret values
+- **Rate limiting** on auth and user-creation endpoints (5–20 req/15min per IP)
+
+### Input Validation & XSS Prevention
+- **Allowlist validation** on query parameters: `wk` must be UUID format, `sd` must be a valid subdomain (`[a-z0-9][a-z0-9-]*[a-z0-9]`). Invalid values return `400 Bad Request`
+- **HTML encoding** of all user-supplied values before injection into HTML
+- **Per-request CSP nonces** for `script-src` — each page load gets a unique nonce; injected `<script>` tags without the nonce are blocked by the browser
+- **`script-src-attr` allows `'unsafe-inline'`** for `onclick`/`onkeydown` event handlers (server-controlled HTML, not an XSS vector)
+- **Input validation** on email, name, external ID, and password fields
+
+### Source Code Protection
+- **Static assets served from `public/` directory only** — `server.js`, `package.json`, and other project files return `404`
+- **Security headers** via helmet middleware (CSP, X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security, etc.)
 - **robots.txt** disallows all crawler access
+
+### Content Security Policy
+| Directive | Value | Purpose |
+|-----------|-------|---------|
+| `script-src` | `'self' 'nonce-<per-request>'` + Zendesk domains | Blocks injected `<script>` tags; only nonce-bearing scripts execute |
+| `script-src-attr` | `'self' 'unsafe-inline'` | Allows `onclick` event handlers (server-controlled HTML) |
+| `default-src` | `'self'` | Restricts all other resource types to same-origin |
+| `object-src` | `'none'` | Blocks Flash/Java plugins |
 
 ## License
 
