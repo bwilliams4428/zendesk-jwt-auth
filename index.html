@@ -11,7 +11,7 @@
   1. Configuration — Save Zendesk admin + Sunco credentials (server-side session),
      then create a Zendesk end-user and set their password.
   2. Quick Login — Authenticate an existing Zendesk user via JWT. Uses persisted
-     config (config.json) so no session is needed. Generates a JWT server-side,
+     config from environment variables so no session is needed. Generates a JWT server-side,
      redirects to /?wk=KEY for snippet injection, then authenticates via zE().
   3. API Logs — View all server-side API calls with expandable details.
   
@@ -323,32 +323,43 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     <strong>What happens when you click Login:</strong>
     <ol style="margin:4px 0 0 20px;padding-left:16px">
       <li>Your <strong>email</strong> is used to look up the Zendesk user account</li>
-      <li>A <strong>JWT token</strong> is generated server-side using your stored Sunco credentials</li>
+      <li>A <strong>JWT token</strong> is generated server-side using credentials from environment variables</li>
       <li>The <strong>messaging widget</strong> loads and authenticates you automatically</li>
       <li>You can then <strong>chat as that user</strong> in the widget</li>
     </ol>
     <br>
-    <strong>First time?</strong> You'll need to enter your Zendesk configuration (the ⚙️ <em>Edit Config</em> button lets you update it later). After that, just email + password each visit.
+    <strong>First time?</strong> Your administrator needs to set the Zendesk credentials as environment variables on the hosting platform. Once configured, you can log in with just your email and password.
   </div>
 
-  <!-- Quick Login config form — shown when no persisted config exists.
-       Sends credentials to POST /api/config which persists them to config.json.
-       After saving, the form hides and the login form appears. -->
+  <!-- Quick Login config status — shown when environment variables are not set.
+       Credentials are now configured via environment variables (not through the UI).
+       This card displays the current env var status. -->
   <div id="qlConfig" class="card" style="display:none">
     <div class="card-header">⚙️ Zendesk Configuration</div>
     <div class="card-body">
-      <p style="font-size:13px;color:var(--text2);margin-bottom:12px">One-time setup. These credentials are stored server-side and used to generate JWTs for login.</p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div class="form-group"><label class="form-label">Subdomain</label><input class="form-input" id="qlSubdomain" placeholder="z3nbwilliams"></div>
-        <div class="form-group"><label class="form-label">Admin Email</label><input class="form-input" id="qlAdminEmail" placeholder="admin@company.com"></div>
-        <div class="form-group"><label class="form-label">API Token</label><input class="form-input" id="qlApiToken" type="password" placeholder="Zendesk API token"></div>
-        <div class="form-group"><label class="form-label">App ID</label><input class="form-input" id="qlAppId" placeholder="62225595c1fb3a00ef92bac9"></div>
-        <div class="form-group"><label class="form-label">Key ID</label><input class="form-input" id="qlKeyId" placeholder="app_6a2e3b044862d1b9713a62a1"></div>
-        <div class="form-group"><label class="form-label">Secret Key</label><input class="form-input" id="qlSecret" type="password" placeholder="JWT Shared Secret"></div>
-        <div class="form-group" style="grid-column:1/-1"><label class="form-label">Widget Key</label><input class="form-input" id="qlWidgetKey" placeholder="8b5a738b-fb7a-42c5-95a6-1cb26e82900a"><div class="form-hint">Found in Zendesk Admin → Channels → Messaging → Web Widget</div></div>
+      <div style="background:var(--warning-light);border:1px solid #e8cb8a;border-radius:var(--radius-sm);padding:12px 16px;font-size:13px;color:#6d4900;margin-bottom:16px">
+        <strong>⚠️ Configuration Required</strong><br>
+        Credentials are now managed via <strong>environment variables</strong> for security. Set the following on your hosting platform (Render → Environment):
+        <ul style="margin:8px 0 0 20px;font-size:12px;font-family:'SF Mono',SFMono-Regular,Consolas,monospace">
+          <li><code>ZENDESK_SUBDOMAIN</code></li>
+          <li><code>ZENDESK_ADMIN_EMAIL</code></li>
+          <li><code>ZENDESK_API_TOKEN</code> (Secret)</li>
+          <li><code>SUNCO_APP_ID</code></li>
+          <li><code>SUNCO_KEY_ID</code></li>
+          <li><code>SUNCO_SECRET</code> (Secret)</li>
+          <li><code>ZENDESK_WIDGET_KEY</code></li>
+        </ul>
       </div>
-      <div class="btn-group" style="margin-top:12px">
-        <button class="btn btn-primary" onclick="saveQlConfig()">Save Configuration</button>
+      <div id="qlConfigFields" style="display:none">
+        <p style="font-size:13px;color:var(--success);font-weight:600;margin-bottom:8px">✓ Configuration detected (from environment variables)</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="form-group"><label class="form-label">Subdomain</label><input class="form-input" id="qlSubdomain" readonly style="background:var(--surface2)"></div>
+          <div class="form-group"><label class="form-label">Admin Email</label><input class="form-input" id="qlAdminEmail" readonly style="background:var(--surface2)"></div>
+          <div class="form-group"><label class="form-label">App ID</label><input class="form-input" id="qlAppId" readonly style="background:var(--surface2)"></div>
+          <div class="form-group"><label class="form-label">Key ID</label><input class="form-input" id="qlKeyId" readonly style="background:var(--surface2)"></div>
+          <div class="form-group" style="grid-column:1/-1"><label class="form-label">Widget Key</label><input class="form-input" id="qlWidgetKey" readonly style="background:var(--surface2)"></div>
+        </div>
+        <div class="form-hint" style="margin-top:8px">Sensitive fields (API Token, Secret Key) are never exposed. Configuration is read-only — update via environment variables.</div>
       </div>
       <div class="status-box" id="qlConfigStatus"></div>
     </div>
@@ -458,13 +469,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     </div>
 
     <div class="doc-callout">
-      💡 Credentials entered on this page are stored in the server's <strong>in-memory session store</strong> (keyed by a random <code>sessionId</code>). They are <strong>never saved in the browser</strong>. The <code>sessionId</code> is the only thing stored in <code>sessionStorage</code>. Credentials are lost when the server restarts.
+      💡 Credentials entered on this page are stored in the server's <strong>in-memory session store</strong> (keyed by a random <code>sessionId</code>). They are <strong>never saved in the browser</strong>. The <code>sessionId</code> is the only thing stored in <code>sessionStorage</code>. Sessions expire after 15 minutes of inactivity and are lost when the server restarts.
     </div>
   </div>
 
   <div class="doc-section">
     <h3>⚡ Quick Login Page</h3>
-    <p>Quick Login authenticates an existing Zendesk end-user into the messaging widget in one step — just email and password. It uses <strong>persisted config</strong> stored in <code>config.json</code> on the server, so credentials survive restarts.</p>
+    <p>Quick Login authenticates an existing Zendesk end-user into the messaging widget in one step — just email and password. It uses <strong>environment variables</strong> set on the hosting platform, so credentials survive restarts and redeploys securely.</p>
 
     <h4>How it works</h4>
     <div class="doc-step">
@@ -473,7 +484,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     </div>
     <div class="doc-step">
       <div class="doc-step-num">2</div>
-      <div class="doc-step-text">The server looks up the Zendesk user by email via <code>GET /api/v2/users/search.json?query=email</code> using admin API credentials.</div>
+      <div class="doc-step-text">The server looks up the Zendesk user by email via <code>GET /api/v2/users/search.json?query=email</code> using admin API credentials from environment variables.</div>
     </div>
     <div class="doc-step">
       <div class="doc-step-num">3</div>
@@ -497,7 +508,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     </div>
 
     <div class="doc-callout">
-      💡 <strong>First time?</strong> If no persisted config exists, you'll see the config form instead of the login form. After saving config, the login form appears automatically.
+      💡 <strong>First time?</strong> If environment variables are not configured, you'll see a warning on the Quick Login page. An administrator needs to set <code>ZENDESK_SUBDOMAIN</code>, <code>ZENDESK_ADMIN_EMAIL</code>, <code>ZENDESK_API_TOKEN</code>, <code>SUNCO_APP_ID</code>, <code>SUNCO_KEY_ID</code>, <code>SUNCO_SECRET</code>, and <code>ZENDESK_WIDGET_KEY</code> on the hosting platform.
     </div>
   </div>
 
@@ -520,8 +531,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     <h4>Two Credential Storage Mechanisms</h4>
     <table class="doc-table">
       <tr><th>Mechanism</th><th>Used by</th><th>Storage</th><th>Persists?</th></tr>
-      <tr><td><strong>In-memory session</strong></td><td>Configuration page</td><td><code>credentialsStore</code> object in server RAM, keyed by random <code>sessionId</code></td><td>No — lost on server restart</td></tr>
-      <tr><td><strong>Persisted config</strong></td><td>Quick Login page</td><td><code>config.json</code> file on disk</td><td>Yes — survives restarts</td></tr>
+      <tr><td><strong>In-memory session</strong></td><td>Configuration page</td><td><code>credentialsStore</code> object in server RAM, keyed by random <code>sessionId</code></td><td>No — expires after 15 min idle, lost on server restart</td></tr>
+      <tr><td><strong>Environment variables</strong></td><td>Quick Login page</td><td>Server <code>process.env</code> (set on hosting platform)</td><td>Yes — survives restarts and redeploys</td></tr>
     </table>
 
     <h4>JWT Generation</h4>
@@ -547,8 +558,8 @@ Sign:    HMAC-SHA256(secret_as_raw_string, header_b64url + "." + payload_b64url)
       <tr><td><code>DELETE /api/session/:id</code></td><td colspan="2">Clear a session's credentials</td></tr>
       <tr><td><code>DELETE /api/reset/:id</code></td><td colspan="2">Full reset: clear session + all logs</td></tr>
       <tr><td><code>GET /api/config</code></td><td colspan="2">Check if persisted config exists (returns non-sensitive fields)</td></tr>
-      <tr><td><code>POST /api/config</code></td><td colspan="2">Save config to <code>config.json</code></td></tr>
-      <tr><td><code>DELETE /api/config</code></td><td colspan="2">Delete <code>config.json</code></td></tr>
+      <tr><td><code>POST /api/config</code></td><td colspan="2">Validate that environment variables are configured</td></tr>
+      <tr><td><code>DELETE /api/config</code></td><td colspan="2">No-op (env vars cannot be deleted via API)</td></tr>
       <tr><td><code>POST /api/zendesk-users</code></td><td colspan="2">Create a Zendesk end-user</td></tr>
       <tr><td><code>POST /api/zendesk-users/:id/password</code></td><td colspan="2">Set a user's password</td></tr>
       <tr><td><code>POST /api/sunco-users</code></td><td colspan="2">Create/update a Sunco user (auto-retries as PATCH on 409)</td></tr>
@@ -564,11 +575,16 @@ Sign:    HMAC-SHA256(secret_as_raw_string, header_b64url + "." + payload_b64url)
   <div class="doc-section">
     <h3>🔒 Security Notes</h3>
     <ul>
-      <li><strong>Credentials never reach the browser</strong> — they are stored server-side (in-memory for Configuration, <code>config.json</code> for Quick Login) and only a <code>sessionId</code> is stored in <code>sessionStorage</code>.</li>
+      <li><strong>Credentials are stored in environment variables</strong> — never in config.json or client-side storage. Set <code>ZENDESK_*</code> and <code>SUNCO_*</code> env vars on your hosting platform.</li>
       <li><strong>JWT signing is server-side</strong> — the Secret Key is never sent to the browser. Only the signed JWT token is returned.</li>
+      <li><strong>API logs require authentication</strong> — all <code>/api/</code> endpoints require a valid session or API key header.</li>
       <li><strong>API logs redact sensitive fields</strong> — passwords, API tokens, secrets, and authorization headers are replaced with <code>••••••••</code>.</li>
-      <li><strong>Auth data is one-time use</strong> — after the redirect flow completes, JWT and user data are cleared from <code>sessionStorage</code>.</li>
-      <li><strong>This is a development/testing tool</strong> — credentials are stored in plaintext in <code>config.json</code> and in server memory. Do not expose this app to the public internet without additional security measures (HTTPS, authentication, etc.).</li>
+      <li><strong>Sessions expire after 15 minutes of inactivity</strong> — in-memory credential store has a TTL to limit exposure.</li>
+      <li><strong>JWTs expire after 15 minutes</strong> — reduced from 1 hour. A jti (JWT ID) blocklist supports revocation.</li>
+      <li><strong>Rate limiting</strong> — authentication and user-creation endpoints are rate-limited (5–20 req/15min per IP).</li>
+      <li><strong>Security headers</strong> — helmet middleware sets CSP, X-Frame-Options, X-Content-Type-Options, and more.</li>
+      <li><strong>Input validation</strong> — email, name, external ID, and password fields are validated and sanitized before use.</li>
+      <li><strong>Production error handling</strong> — stack traces are never leaked to clients in production mode.</li>
     </ul>
   </div>
 
@@ -903,7 +919,7 @@ function configLogout() {
 // QUICK LOGIN PAGE — Self-contained: config + login on one page
 // ============================================================
 // The Quick Login page is a self-contained flow that doesn't require a
-// server-side session. It uses persisted config (config.json) instead.
+// server-side session. It uses environment variables instead.
 //
 // The page has 3 states:
 // 1. Config form (qlConfig) — shown if no persisted config exists yet
@@ -990,16 +1006,17 @@ function authenticateUser(jwt, user) {
 // Used to determine whether to show the config form or the login form.
 var _qlHasConfig = false;
 
-// updateQlPage — Checks the server for persisted config and shows the
+// updateQlPage — Checks the server for env-var config and shows the
 // appropriate Quick Login sub-view:
-// - If config exists: pre-fills non-sensitive fields and shows the login form
-// - If no config: shows the config form for first-time setup
+// - If config exists: shows read-only env var info and the login form
+// - If no config: shows warning that env vars need to be set
 function updateQlPage() {
-  // Always check server for persisted config
+  // Check server for config (now from environment variables)
   _rawFetch('/api/config').then(function(r) { return r.json(); }).then(function(data) {
     _qlHasConfig = data.hasConfig;
     if (data.hasConfig) {
-      // Pre-fill config fields for Edit Config (non-sensitive only)
+      // Show read-only config fields from env vars (non-sensitive only)
+      document.getElementById('qlConfigFields').style.display = '';
       if (data.subdomain) document.getElementById('qlSubdomain').value = data.subdomain;
       if (data.adminEmail) document.getElementById('qlAdminEmail').value = data.adminEmail;
       if (data.appId) document.getElementById('qlAppId').value = data.appId;
@@ -1010,6 +1027,8 @@ function updateQlPage() {
       document.getElementById('qlLogin').style.display = '';
       document.getElementById('qlSuccess').style.display = 'none';
     } else {
+      // Show config warning card (env vars not set)
+      document.getElementById('qlConfigFields').style.display = 'none';
       document.getElementById('qlConfig').style.display = '';
       document.getElementById('qlLogin').style.display = 'none';
       document.getElementById('qlSuccess').style.display = 'none';
@@ -1020,62 +1039,28 @@ function updateQlPage() {
   });
 }
 
-// saveQlConfig — Save the Quick Login config to the server (POST /api/config).
-// Persists credentials to config.json so they survive server restarts.
-// After saving, clears sensitive fields and shows the login form.
+// saveQlConfig — No longer saves secrets via the UI.
+// Credentials are now managed via environment variables.
+// This function is kept for backward compat but shows an error directing users to env vars.
 function saveQlConfig() {
-  var fields = {
-    subdomain: document.getElementById('qlSubdomain').value.trim(),
-    adminEmail: document.getElementById('qlAdminEmail').value.trim(),
-    apiToken: document.getElementById('qlApiToken').value.trim(),
-    appId: document.getElementById('qlAppId').value.trim(),
-    keyId: document.getElementById('qlKeyId').value.trim(),
-    secret: document.getElementById('qlSecret').value.trim(),
-    widgetKey: document.getElementById('qlWidgetKey').value.trim()
-  };
-  for (var k in fields) {
-    if (k !== 'widgetKey' && !fields[k]) {
-      showStatus('qlConfigStatus', 'error', 'All fields except Widget Key are required.');
-      return;
-    }
-  }
-
-  showStatus('qlConfigStatus', 'info', 'Saving…');
-  _rawFetch('/api/config', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(fields)
-  }).then(function(r) { return r.json(); }).then(function(data) {
-    if (data.success) {
-      _qlHasConfig = true;
-      // Clear sensitive fields
-      ['qlApiToken','qlSecret','qlWidgetKey'].forEach(function(id) { document.getElementById(id).value = ''; });
-      showStatus('qlConfigStatus', 'success', 'Configuration saved!');
-      // Show login form
-      document.getElementById('qlConfig').style.display = 'none';
-      document.getElementById('qlLogin').style.display = '';
-      // Focus email field
-      document.getElementById('qlEmail').focus();
-    } else {
-      showStatus('qlConfigStatus', 'error', data.error || 'Failed to save configuration.');
-    }
-  }).catch(function(e) { showStatus('qlConfigStatus', 'error', 'Network error: ' + e.message); });
+  showStatus('qlConfigStatus', 'error', 'Configuration is now managed via environment variables. Set ZENDESK_SUBDOMAIN, ZENDESK_ADMIN_EMAIL, ZENDESK_API_TOKEN, SUNCO_APP_ID, SUNCO_KEY_ID, SUNCO_SECRET, and ZENDESK_WIDGET_KEY on your hosting platform.');
 }
 
-// editQlConfig — Shows the config form and pre-fills non-sensitive fields
-// from the server (GET /api/config). Sensitive fields (apiToken, secret)
-// are not returned by the API, so the user must re-enter those.
+// editQlConfig — Shows the config info card with env var details
 function editQlConfig() {
   document.getElementById('qlLogin').style.display = 'none';
   document.getElementById('qlConfig').style.display = '';
-  // Pre-fill non-sensitive fields from server
+  // Pre-fill non-sensitive fields from server (read-only, from env vars)
   _rawFetch('/api/config').then(function(r) { return r.json(); }).then(function(data) {
     if (data.hasConfig) {
+      document.getElementById('qlConfigFields').style.display = '';
       if (data.subdomain) document.getElementById('qlSubdomain').value = data.subdomain;
       if (data.adminEmail) document.getElementById('qlAdminEmail').value = data.adminEmail;
       if (data.appId) document.getElementById('qlAppId').value = data.appId;
       if (data.keyId) document.getElementById('qlKeyId').value = data.keyId;
       if (data.widgetKey) document.getElementById('qlWidgetKey').value = data.widgetKey;
+    } else {
+      document.getElementById('qlConfigFields').style.display = 'none';
     }
   }).catch(function() {});
 }
@@ -1184,9 +1169,8 @@ function fullReset() {
   document.getElementById('logCount').textContent = '0 entries';
   document.getElementById('navLogBadge').style.display = 'none';
 
-  // Reset Quick Login state
+  // Reset Quick Login state (config is env vars now — no API delete needed)
   _qlHasConfig = false;
-  _rawFetch('/api/config', { method: 'DELETE' }).catch(function() {});
   document.getElementById('qlConfig').style.display = '';
   document.getElementById('qlLogin').style.display = 'none';
   document.getElementById('qlSuccess').style.display = 'none';

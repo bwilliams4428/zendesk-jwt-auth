@@ -32,7 +32,7 @@ For users you've already created. Enter email + password → the server looks up
 
 ### API Logs Page
 
-Every Zendesk and Sunco API call made by the server is logged with full request/response details (credentials redacted). Useful for debugging.
+Every Zendesk and Sunco API call made by the server is logged with full request/response details (credentials redacted). Requires authentication to view.
 
 ## Architecture
 
@@ -47,18 +47,18 @@ Every Zendesk and Sunco API call made by the server is logged with full request/
 │         │              │                          │
 └─────────┼──────────────┼──────────────────────────┘
           │ HTTP (sessionId only)                   
-          ▼                                         
+          ▼                                        
 ┌──────────────────────────────────────────────────┐
 │  Express Server (server.js)                       │
 │                                                   │
-│  • Stores credentials server-side (never sent    │
-│    to the browser — only a random sessionId)     │
-│  • Proxies Zendesk & Sunco API calls (CORS)      │
-│  • Signs JWTs server-side (Secret Key never      │
-│    reaches the browser)                          │
-│  • Injects Zendesk widget snippet into <head>    │
-│    when ?wk= query param is present              │
-│  • Persists config to config.json (optional)     │
+│  • Credentials from environment variables          │
+│  • Session store: in-memory with 15-min TTL       │
+│  • Proxies Zendesk & Sunco API calls (CORS)       │
+│  • Signs JWTs server-side (Secret Key never       │
+│    reaches the browser)                           │
+│  • Injects Zendesk widget snippet into <head>     │
+│    when ?wk= query param is present               │
+│  • Rate limiting, helmet, input validation         │
 └──────────────────────────────────────────────────┘
           │                          
           ▼                          
@@ -78,20 +78,25 @@ Every Zendesk and Sunco API call made by the server is logged with full request/
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/session` | Create an ephemeral session (credentials held in memory) |
+| `POST` | `/api/session` | Create an ephemeral session (credentials held in memory, 15-min TTL) |
 | `GET` | `/api/session/:id` | Get session data (subdomain, widgetKey) |
 | `DELETE` | `/api/session/:id` | Clear session credentials |
-| `POST` | `/api/config` | Save credentials to `config.json` (persists across restarts) |
-| `GET` | `/api/config` | Read saved config (credentials redacted) |
-| `DELETE` | `/api/config` | Delete saved config |
+| `GET` | `/api/config` | Check if env vars are configured (returns non-sensitive fields) |
+| `POST` | `/api/config` | Validate env vars are set |
 | `POST` | `/api/zendesk-users` | Create a Zendesk end-user |
 | `POST` | `/api/zendesk-users/:id/password` | Set a user's password |
 | `POST` | `/api/sunco-users` | Create/update a Sunco user profile (auto-retries as PATCH on 409) |
 | `GET` | `/api/sunco-users/:externalId` | Look up a Sunco user by externalId |
 | `POST` | `/api/generate-jwt` | Sign a JWT using session credentials |
-| `POST` | `/api/quick-login` | End-to-end login: look up user by email, generate JWT, return auth data (uses persisted config) |
-| `GET` | `/api/logs` | Get all logged API calls |
-| `DELETE` | `/api/logs` | Clear API logs |
+| `POST` | `/api/quick-login` | End-to-end login: look up user by email, generate JWT, return auth data (uses env vars) |
+| `GET` | `/api/logs` | Get all logged API calls (requires auth) |
+| `DELETE` | `/api/logs` | Clear API logs (requires auth) |
+
+All `/api/` endpoints require authentication (valid sessionId or `X-API-Key` header) except:
+- `GET /api/config` — public, returns non-sensitive config status only
+- `POST /api/session` — creates a new session
+- `POST /api/quick-login` — uses env var credentials
+- `POST /api/config` — validates env vars
 
 ## Setup
 
@@ -103,27 +108,61 @@ Every Zendesk and Sunco API call made by the server is logged with full request/
 - **Sunco Key ID + Secret Key** — for creating Sunco user profiles and signing JWTs (Conversations API key token)
 - **Widget Key** — from Admin Center → Channels → Messaging → Web Widget → Installation
 
+### Environment Variables
+
+Set these on your hosting platform (Render → Environment, or in `.env` for local dev):
+
+| Variable | Description |
+|----------|-------------|
+| `ZENDESK_SUBDOMAIN` | Your Zendesk subdomain (e.g., `mycompany`) |
+| `ZENDESK_ADMIN_EMAIL` | Admin email for API calls |
+| `ZENDESK_API_TOKEN` | Zendesk API token (secret) |
+| `SUNCO_APP_ID` | Sunshine Conversations App ID |
+| `SUNCO_KEY_ID` | Conversations API key ID (e.g., `app_xxx`) |
+| `SUNCO_SECRET` | Secret Key for JWT signing (secret, used as raw string) |
+| `ZENDESK_WIDGET_KEY` | Web Widget key for snippet injection |
+| `API_KEY` | *(Optional)* API key for programmatic access to `/api/logs` |
+| `NODE_ENV` | Set to `production` for hardened error handling |
+
 ### Local Development
 
 ```bash
 git clone https://github.com/bwilliams4428/zendesk-jwt-auth.git
 cd zendesk-jwt-auth
 npm install
+
+# Set environment variables (choose one method):
+# Option 1: .env file
+cat > .env << 'EOF'
+ZENDESK_SUBDOMAIN=your-subdomain
+ZENDESK_ADMIN_EMAIL=admin@example.com
+ZENDESK_API_TOKEN=your-api-token
+SUNCO_APP_ID=your-app-id
+SUNCO_KEY_ID=app_your-key-id
+SUNCO_SECRET=your-secret-key
+ZENDESK_WIDGET_KEY=your-widget-key
+EOF
+
+# Option 2: export directly
+export ZENDESK_SUBDOMAIN=your-subdomain
+# ... etc
+
 npm start
 # Open http://localhost:3000
 ```
-
-No environment variables needed — all credentials are entered through the web UI.
 
 ### Deploy to Render
 
 1. Create a new **Web Service** on [Render](https://render.com)
 2. Connect your GitHub repo
-3. Render will auto-detect the `render.yaml`:
-   - **Build Command:** `npm install`
-   - **Start Command:** `npm start`
-4. No environment variables required — configure credentials through the web UI after deploy
-5. Your app will be live at `https://zendesk-jwt-auth.onrender.com`
+3. Render will auto-detect the `render.yaml`
+4. **Set environment variables** in Render → Environment:
+   - `ZENDESK_SUBDOMAIN`, `ZENDESK_ADMIN_EMAIL`, `ZENDESK_API_TOKEN`
+   - `SUNCO_APP_ID`, `SUNCO_KEY_ID`, `SUNCO_SECRET`
+   - `ZENDESK_WIDGET_KEY`
+   - `NODE_ENV=production`
+5. Mark `ZENDESK_API_TOKEN`, `SUNCO_SECRET` as **secret** values
+6. Deploy — your app will be live at your Render URL
 
 ### Deploy Anywhere
 
@@ -136,13 +175,19 @@ npm start
 
 The server listens on `PORT` (defaults to 3000). Render sets this automatically.
 
-## Security Notes
+## Security
 
-- **Credentials never reach the browser** — only a random `sessionId` is stored client-side
-- **JWTs are signed server-side** — the Secret Key never leaves the server
+- **Credentials stored in environment variables** — never in `config.json` or client-side storage
+- **JWTs are signed server-side** — the Secret Key never reaches the browser
+- **API endpoints require authentication** — sessionId or API key header
 - **API logs redact** all password, token, and secret values
-- **The proxy is required** — Zendesk APIs don't support CORS, so browser-side calls are impossible
-- Sessions are ephemeral (in-memory, reset on server restart). Use **Quick Login** with saved config for persistence.
+- **Sessions expire after 15 minutes** of inactivity (in-memory TTL)
+- **JWTs expire after 15 minutes** — reduced from 1 hour
+- **Rate limiting** on auth and user-creation endpoints (5–20 req/15min per IP)
+- **Security headers** via helmet middleware (CSP, X-Frame-Options, etc.)
+- **Input validation** on email, name, external ID, and password fields
+- **Production error handling** — no stack traces leaked to clients
+- **robots.txt** disallows all crawler access
 
 ## License
 

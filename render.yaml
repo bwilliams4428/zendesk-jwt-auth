@@ -1,9 +1,16 @@
 # Render Configuration for Zendesk JWT Auth
 #
-# This app does NOT use environment variables for credentials.
-# Configuration is done through the web UI — credentials are stored
-# in server-side sessions (ephemeral) or config.json (persisted).
-# They are never hardcoded or set as env vars.
+# SECURITY: All credentials are now set via environment variables.
+# Set these in Render's Environment section (or use Secret Files):
+#   ZENDESK_SUBDOMAIN - Your Zendesk subdomain (e.g. z3nbwilliams)
+#   ZENDESK_ADMIN_EMAIL - Admin email for API calls
+#   ZENDESK_API_TOKEN - Zendesk API token (Secret)
+#   SUNCO_APP_ID - Sunshine Conversations App ID
+#   SUNCO_KEY_ID - Sunco Key ID (e.g. app_xxx)
+#   SUNCO_SECRET - Sunco Secret Key for JWT signing (Secret)
+#   ZENDESK_WIDGET_KEY - Web widget key for snippet injection
+#   API_KEY - Optional API key for programmatic access to /api/logs
+#   NODE_ENV - Set to "production"
 
 services:
   - type: web
